@@ -1,0 +1,25 @@
+# Course materials and large files (do not commit)
+.fuse_hidden*
+*.pdf
+*.zip
+ebooks/
+hangout/
+papers/
+IT4931_data_management_and_processing_lab_materials/
+LAKEHOUSE_CONCEPTS_VI (2).md
+NHAN_DINH_Market_Lakehouse.md
+TOM_TAT_MON_HOC.md
+note.txt
+
+# Project runtime / local state
+btl-market-lakehouse/.venv/
+btl-market-lakehouse/venv/
+btl-market-lakehouse/__pycache__/
+btl-market-lakehouse/**/__pycache__/
+btl-market-lakehouse/.pytest_cache/
+btl-market-lakehouse/.ruff_cache/
+btl-market-lakehouse/data/
+btl-market-lakehouse/.env
+btl-market-lakehouse/spark-warehouse/
+btl-market-lakehouse/metastore_db/
+btl-market-lakehouse/derby.log
