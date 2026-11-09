@@ -10,3 +10,21 @@ resources:
   - airflow.yaml
   - market-api.yaml
   - monitoring.yaml
+
+configMapGenerator:
+  - name: grafana-datasources
+    namespace: market
+    files:
+      - datasources.yml=../monitoring/grafana/provisioning/datasources/datasources.yml
+  - name: grafana-dashboard-provider
+    namespace: market
+    files:
+      - dashboards.yml=../monitoring/grafana/provisioning/dashboards/dashboards.yml
+  - name: grafana-dashboards
+    namespace: market
+    files:
+      - market-overview.json=../monitoring/grafana/dashboards/market-overview.json
+      - infra-health.json=../monitoring/grafana/dashboards/infra-health.json
+
+generatorOptions:
+  disableNameSuffixHash: true
