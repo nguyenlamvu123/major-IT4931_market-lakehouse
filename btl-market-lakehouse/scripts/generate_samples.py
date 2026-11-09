@@ -28,6 +28,8 @@ def main() -> None:
     counts: dict[str, int] = {}
 
     for asset_class in ASSET_CLASSES:
+        if asset_class == "rates":
+            continue
         topic = topic_for(asset_class, "trades")
         subset = [record for record in trades if record["asset_class"] == asset_class]
         write_jsonl(SAMPLES / f"{topic}.jsonl", subset)
