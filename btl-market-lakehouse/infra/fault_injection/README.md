@@ -6,8 +6,8 @@ Run them on a disposable dev machine, observe the dashboards, then restore.
 ```bash
 export COMPOSE_FILE=infra/docker-compose.full.yml
 bash infra/fault_injection/stop_cassandra.sh
-# API /health still works if it started in demo mode; restart it to force fallback:
-docker compose -f "$COMPOSE_FILE" restart market-api
+# /health reports source=demo; the API retries every 5s and switches back to
+# Cassandra after restore, so no restart is required.
 bash infra/fault_injection/restore.sh
 ```
 
@@ -15,7 +15,7 @@ bash infra/fault_injection/restore.sh
 
 | Scenario | Script | Expected observable behavior | Recovery |
 |---|---|---|---|
-| Cassandra outage | `stop_cassandra.sh` | API starts in demo mode if Cassandra is down at boot | `restore.sh`, restart API |
+| Cassandra outage | `stop_cassandra.sh` | `/health` reports demo mode; API retries and recovers | `restore.sh` |
 | Spark worker loss | `stop_spark_worker.sh` | Spark retries tasks; streaming may lag | `restore.sh`, check Spark UI |
 | MinIO outage | `stop_minio.sh` | Kafka Connect S3 sink retries; batch jobs fail | `restore.sh`, replay batch |
 | Consumer lag | `pause_consumer.sh` | Kafka group lag grows; streaming freshness drops | resume consumer / restart job |
@@ -28,5 +28,6 @@ bash infra/fault_injection/restore.sh
 
 ## Known limitation
 
-`market-api` chooses Cassandra vs demo mode at startup. If Cassandra fails later,
-requests to Cassandra-backed endpoints return errors until the pod/container restarts.
+`market-api` retries the Cassandra connection every 5 seconds. A request that races
+with a disconnect can return an empty list before the next request falls back to demo
+data. Cassandra-backed requests are read-only and safe to retry.
