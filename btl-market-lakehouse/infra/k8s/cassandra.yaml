@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra
+  namespace: market
+spec:
+  clusterIP: None
+  selector:
+    app: cassandra
+  ports:
+    - name: cql
+      port: 9042
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra
+  namespace: market
+spec:
+  serviceName: cassandra
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cassandra
+  template:
+    metadata:
+      labels:
+        app: cassandra
+    spec:
+      containers:
+        - name: cassandra
+          image: cassandra:4.1
+          ports:
+            - containerPort: 9042
+              name: cql
+          env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: market
+            - name: CASSANDRA_DC
+              value: dc1
+            - name: CASSANDRA_ENDPOINT_SNITCH
+              value: GossipingPropertyFileSnitch
+            - name: MAX_HEAP_SIZE
+              value: 768M
+            - name: HEAP_NEWSIZE
+              value: 128M
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cassandra
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: "2"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cassandra-schema
+  namespace: market
+data:
+  schema.cql: |
+    CREATE KEYSPACE IF NOT EXISTS market
+    WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+    USE market;
+    CREATE TABLE IF NOT EXISTS ohlcv_1m (
+      symbol text, window_start timestamp, open double, high double, low double,
+      close double, volume double, vwap double, trade_count int,
+      sma_5 double, sma_15 double, rsi_14 double, macd double, macd_signal double,
+      zscore_30m double, PRIMARY KEY ((symbol), window_start)
+    ) WITH CLUSTERING ORDER BY (window_start DESC);
+    CREATE TABLE IF NOT EXISTS alerts (
+      symbol text, alert_time timestamp, alert_id text, alert_type text, severity text,
+      price double, zscore double, volume_zscore double, message text,
+      PRIMARY KEY ((symbol), alert_time, alert_id)
+    ) WITH CLUSTERING ORDER BY (alert_time DESC, alert_id ASC);
+    CREATE TABLE IF NOT EXISTS latest_price (
+      symbol text PRIMARY KEY, price double, event_time timestamp, source text
+    );
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cassandra-init
+  namespace: market
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: cqlsh
+          image: cassandra:4.1
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              until cqlsh cassandra -e "describe keyspaces" >/dev/null 2>&1; do sleep 5; done
+              cqlsh cassandra -f /schema/schema.cql
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      volumes:
+        - name: schema
+          configMap:
+            name: cassandra-schema
