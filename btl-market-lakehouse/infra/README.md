@@ -29,6 +29,9 @@ docker compose -f infra/docker-compose.dev.yml down -v
 `infra/docker-compose.full.yml` adds Kafka Connect, Spark master/worker, Airflow,
 market-api, Prometheus and Grafana.
 
+Dashboards and the API are documented in `infra/monitoring/README.md` and
+`serving/README.md`.
+
 ```bash
 docker compose -f infra/docker-compose.full.yml up -d
 ```
