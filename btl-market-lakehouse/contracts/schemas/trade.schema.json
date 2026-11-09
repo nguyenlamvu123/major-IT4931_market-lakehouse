@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://btl-it4931.example/contracts/trade.schema.json",
+  "title": "Trade",
+  "type": "object",
+  "required": [
+    "trade_id",
+    "symbol",
+    "asset_class",
+    "event_time",
+    "price",
+    "volume",
+    "source"
+  ],
+  "properties": {
+    "trade_id": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 64
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9._-]{2,20}$"
+    },
+    "asset_class": {
+      "type": "string",
+      "enum": ["crypto", "equity", "commodity", "fx", "rates"]
+    },
+    "event_time": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Epoch milliseconds, UTC"
+    },
+    "ingest_time": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Epoch milliseconds, UTC"
+    },
+    "price": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "volume": {
+      "type": "number",
+      "minimum": 0
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "currency": {
+      "type": "string",
+      "default": "USD"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

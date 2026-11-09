@@ -1,0 +1,37 @@
+version: 1
+
+defaults:
+  replication: 1
+  cleanup_policy: delete
+
+topics:
+  - name: crypto.trades
+    partitions: 3
+    retention_ms: 604800000
+    key: symbol
+    owner: A
+  - name: equity.trades
+    partitions: 3
+    retention_ms: 604800000
+    key: symbol
+    owner: A
+  - name: commodity.trades
+    partitions: 3
+    retention_ms: 604800000
+    key: symbol
+    owner: A
+  - name: fx.trades
+    partitions: 3
+    retention_ms: 604800000
+    key: symbol
+    owner: A
+  - name: rates.ticks
+    partitions: 1
+    retention_ms: 86400000
+    key: tenor
+    owner: A
+  - name: market.alerts
+    partitions: 3
+    retention_ms: 259200000
+    key: symbol
+    owner: B
