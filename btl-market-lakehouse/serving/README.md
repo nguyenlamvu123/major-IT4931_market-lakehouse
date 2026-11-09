@@ -1,8 +1,9 @@
 # Market API (role D)
 
 Small read-only API that turns Cassandra bars/alerts into JSON for Grafana. If
-Cassandra is not reachable, it serves deterministic demo data from `common/`, so the
-dashboard can be developed on the current machine.
+Cassandra is not reachable, it serves deterministic demo data from `common/` and
+retries the connection every 5 seconds, so the dashboard can be developed on the
+current machine and recovers when Cassandra comes up.
 
 ## Run locally
 

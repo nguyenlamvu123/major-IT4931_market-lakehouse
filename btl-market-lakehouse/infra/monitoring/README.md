@@ -29,7 +29,8 @@ pip install -r serving/requirements.txt
 uvicorn serving.market_api:app --port 8000
 ```
 
-The API falls back to deterministic demo data when Cassandra is absent.
+The API falls back to deterministic demo data when Cassandra is absent and retries
+the connection every 5 seconds.
 
 ## Prometheus queries
 
