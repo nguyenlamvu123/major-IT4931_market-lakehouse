@@ -1,0 +1,11 @@
+{
+  "topics": {
+    "crypto.trades": 42,
+    "equity.trades": 56,
+    "commodity.trades": 42,
+    "fx.trades": 42,
+    "rates.ticks": 12
+  },
+  "format": "jsonl",
+  "note": "Deterministic sample data for schema tests; not production data."
+}
