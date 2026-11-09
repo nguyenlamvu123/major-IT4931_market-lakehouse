@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: ["main", "feature/**", "integration"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas pyarrow numpy requests python-dotenv PyYAML pytest \
+            fastapi "uvicorn[standard]" prometheus-client
+      - name: Compile
+        run: |
+          for d in common ingest streaming batch serving scripts tests; do
+            if [ -d "$d" ]; then python -m compileall -q "$d"; fi
+          done
+      - name: Unit tests
+        run: python -m pytest
+      - name: Local demo
+        run: python scripts/run_local_demo.py
+      - name: Verify demo output
+        run: python scripts/verify_pipeline.py
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dev compose config
+        if: ${{ hashFiles('infra/docker-compose.dev.yml') != '' }}
+        run: docker compose -f infra/docker-compose.dev.yml config -q
+      - name: Full compose config
+        if: ${{ hashFiles('infra/docker-compose.full.yml') != '' }}
+        run: docker compose -f infra/docker-compose.full.yml config -q
+      - name: Kubernetes YAML parse
+        if: ${{ hashFiles('infra/k8s/*.yaml') != '' }}
+        run: |
+          pip install PyYAML
+          python - <<'PY'
+          import glob, yaml
+          for path in sorted(glob.glob("infra/k8s/*.yaml")):
+              list(yaml.safe_load_all(open(path, encoding="utf-8")))
+              print("ok", path)
+          PY
