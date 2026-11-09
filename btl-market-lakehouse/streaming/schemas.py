@@ -63,6 +63,3 @@ ALERT_SCHEMA = StructType(
         StructField("message", StringType(), True),
     ]
 )
-
-BAR_COLUMNS = [field.name for field in BAR_SCHEMA.fields]
-ALERT_COLUMNS = [field.name for field in ALERT_SCHEMA.fields]
