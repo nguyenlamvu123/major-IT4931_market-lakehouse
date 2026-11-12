@@ -37,9 +37,12 @@ images:
   - btl/kafka-connect-s3:dev
 
 metrics:
-  producers: {port: 8001, path: /metrics, series: [market_producer_messages_total, market_producer_errors_total, market_producer_reconnects_total, market_producer_dead_letter_total]}
+  producers: {port: 8001, path: /metrics, series: [market_producer_messages_total, market_producer_errors_total, market_producer_reconnects_total, market_producer_dead_letter_total, market_producer_duplicates_total]}
   streaming_driver: {port: 9108, path: /metrics, series: [market_speed_input_rows_per_second, market_speed_processed_rows_per_second, market_speed_batch_duration_ms, market_speed_offsets_behind_latest, market_speed_event_to_sink_latency_seconds]}
-  kafka_lag: {exporter: strimzi kafka-exporter, series: kafka_consumergroup_lag}
+  # Kafka Connect S3 sinks commit offsets, so their lag is visible. Spark does not commit
+  # offsets to Kafka; its backlog is market_speed_offsets_behind_latest instead.
+  kafka_lag: {exporter: strimzi kafka-exporter, series: kafka_consumergroup_lag,
+              consumer_groups: [connect-s3-sink-bronze, connect-s3-sink-bronze-alerts]}
   market_api: {port: 8000, path: /metrics}
 
 batch_schedule:
