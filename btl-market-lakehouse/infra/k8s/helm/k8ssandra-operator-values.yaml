@@ -1,0 +1,5 @@
+# k8ssandra/k8ssandra-operator, release "k8ssandra-operator" in ns cassandra.
+# Cluster-scoped so it reconciles the K8ssandraCluster "market" in ns cassandra
+# (infra/k8s/cassandra/k8ssandra-cluster.yaml).
+global:
+  clusterScoped: true

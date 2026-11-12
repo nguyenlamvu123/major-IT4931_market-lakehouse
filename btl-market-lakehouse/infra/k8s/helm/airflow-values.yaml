@@ -1,0 +1,82 @@
+# apache-airflow/airflow, release "airflow" in ns airflow.
+# Webserver: airflow-webserver.airflow.svc:8080 (contracts/infra.yaml).
+executor: KubernetesExecutor        # idea PDF, slide "Hạ tầng": Airflow KubernetesExecutor
+airflowVersion: 2.9.3
+defaultAirflowTag: 2.9.3
+
+# btl/airflow:dev = apache/airflow:2.9.3 + role C DAGs and SparkApplication templates
+# (infra/airflow/Dockerfile). Loaded into minikube by `make images`.
+images:
+  airflow:
+    repository: btl/airflow
+    tag: dev
+    pullPolicy: IfNotPresent
+
+# DAGs are baked into the image; no git-sync or shared volume needed.
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+
+# Use infra/k8s/airflow/postgres.yaml instead of the bundled bitnami PostgreSQL.
+postgresql:
+  enabled: false
+data:
+  metadataConnection:
+    user: airflow
+    pass: airflow
+    protocol: postgresql
+    host: airflow-postgres.airflow.svc
+    port: 5432
+    db: airflow
+
+# KubernetesExecutor task pods run as this ServiceAccount; infra/k8s/airflow/spark-rbac.yaml
+# lets it create SparkApplications in ns spark.
+workers:
+  serviceAccount:
+    create: true
+    name: airflow-worker
+
+env:
+  - name: MINIO_ENDPOINT
+    value: http://minio.minio.svc:9000
+  - name: KAFKA_BOOTSTRAP
+    value: market-kafka-bootstrap.kafka.svc:9092
+  - name: CASSANDRA_HOSTS
+    value: market-dc1-service.cassandra.svc
+  - name: SPARK_NAMESPACE
+    value: spark
+  # In-cluster Kubernetes connection for SparkKubernetesOperator.
+  - name: AIRFLOW_CONN_KUBERNETES_DEFAULT
+    value: '{"conn_type": "kubernetes", "extra": {"in_cluster": true}}'
+
+# MinIO credentials for DAG-side checks; created in ns airflow by `make secrets`.
+extraEnvFrom: |
+  - secretRef:
+      name: minio-credentials
+
+config:
+  core:
+    load_examples: "False"
+  webserver:
+    expose_config: "True"
+
+webserver:
+  defaultUser:
+    enabled: true
+    username: admin
+    password: admin
+    role: Admin
+
+# Small footprint for a 16 GB minikube.
+scheduler:
+  resources:
+    requests: {memory: 512Mi, cpu: 200m}
+    limits: {memory: 1Gi}
+triggerer:
+  enabled: false
+statsd:
+  enabled: false
+redis:
+  enabled: false

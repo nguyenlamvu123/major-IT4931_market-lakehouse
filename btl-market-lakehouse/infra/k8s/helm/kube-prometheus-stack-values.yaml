@@ -1,0 +1,45 @@
+# prometheus-community/kube-prometheus-stack, release "kube-prometheus-stack" in ns
+# monitoring. Grafana: kube-prometheus-stack-grafana.monitoring.svc:80.
+prometheus:
+  prometheusSpec:
+    # Pick up ServiceMonitor/PodMonitor objects from infra/k8s/monitoring and the
+    # spark-operator chart without a "release" label.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 3d
+    resources:
+      requests: {memory: 512Mi, cpu: 200m}
+      limits: {memory: 1536Mi}
+
+alertmanager:
+  enabled: false
+
+grafana:
+  adminPassword: admin
+  plugins:
+    - yesoreyeram-infinity-datasource
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: false
+  # The default Prometheus datasource of this chart has uid "prometheus"; dashboards in
+  # infra/monitoring/grafana/dashboards reference that uid and "infinity".
+  additionalDataSources:
+    - name: Market API
+      uid: infinity
+      type: yesoreyeram-infinity-datasource
+      access: proxy
+      url: http://market-api.market.svc:8000
+      jsonData:
+        allowedHosts:
+          - http://market-api.market.svc:8000
+
+kube-state-metrics:
+  resources:
+    requests: {memory: 64Mi, cpu: 50m}

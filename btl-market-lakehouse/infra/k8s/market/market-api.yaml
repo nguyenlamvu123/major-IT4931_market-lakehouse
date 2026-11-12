@@ -1,0 +1,72 @@
+# market-api (role D): read-only JSON bridge Cassandra -> Grafana Infinity datasource.
+# Address: market-api.market.svc:8000 (contracts/infra.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-api
+  namespace: market
+  labels:
+    app: market-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: market-api
+  template:
+    metadata:
+      labels:
+        app: market-api
+    spec:
+      containers:
+        - name: market-api
+          image: btl/market-api:dev
+          # Images are built locally and loaded with `minikube image load` (make images).
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: CASSANDRA_HOSTS
+              value: market-dc1-service.cassandra.svc
+            - name: CASSANDRA_PORT
+              value: "9042"
+            - name: CASSANDRA_KEYSPACE
+              value: market
+            # On the cluster the dashboard must show real data or nothing. Synthetic demo
+            # data is only allowed on laptops (DEMO_FALLBACK=true is the local default).
+            - name: DEMO_FALLBACK
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-api
+  namespace: market
+  labels:
+    app: market-api
+spec:
+  selector:
+    app: market-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

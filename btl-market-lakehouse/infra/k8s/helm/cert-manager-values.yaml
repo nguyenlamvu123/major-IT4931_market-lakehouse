@@ -1,0 +1,4 @@
+# jetstack/cert-manager, release "cert-manager" in ns cert-manager.
+# Required by k8ssandra-operator webhooks.
+crds:
+  enabled: true
