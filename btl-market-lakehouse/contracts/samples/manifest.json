@@ -1,0 +1,15 @@
+{
+  "contract_version": 2,
+  "topics": {
+    "crypto.trades": 20,
+    "stocks.trades": 20,
+    "gold.quotes": 20,
+    "fx.dxy": 20,
+    "stocks.bars": 20,
+    "rates.yields": 20,
+    "alerts": 20
+  },
+  "format": "jsonl",
+  "seed": 11,
+  "note": "Deterministic synthetic data for schema tests; not production data."
+}
