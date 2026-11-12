@@ -157,3 +157,48 @@ def test_dxy_bars_have_null_vwap(spark, memory_sink, input_dir, tmp_path) -> Non
     assert not dxy.empty
     assert dxy["vwap"].isna().all()
     assert (dxy["volume"] == 0).all()
+
+
+def test_spike_across_micro_batches_reaches_alert_and_indicator_tables(
+    spark, memory_sink, tmp_path
+) -> None:
+    from common.contracts import make_trade
+
+    start = pd.Timestamp("2026-11-09T14:30:00Z")
+
+    def trade(minute: int, price: float) -> str:
+        event_time = int((start + pd.Timedelta(minutes=minute, seconds=5)).timestamp() * 1000)
+        record = make_trade(
+            "SPY", "equity", event_time, price, 10.0, "replay", exchange_trade_id=f"spy-{minute}"
+        )
+        return json.dumps(record)
+
+    input_dir = tmp_path / "spike"
+    input_dir.mkdir()
+    calm = input_dir / "stocks.trades-1.jsonl"
+    spike = input_dir / "stocks.trades-2.jsonl"
+    calm.write_text("\n".join(trade(m, 100.0 + m % 2) for m in range(30)) + "\n", encoding="utf-8")
+    spike.write_text(trade(30, 110.0) + "\n", encoding="utf-8")
+    os.utime(calm, (1_000_000_000, 1_000_000_000))
+    os.utime(spike, (1_000_000_100, 1_000_000_100))
+
+    _run(
+        spark,
+        input_dir,
+        tmp_path,
+        memory_sink,
+        ["--max-files-per-trigger", "1", "--queries", "speed-ohlcv-1m"],
+    )
+
+    alerts = memory_sink.table("alerts_by_day")
+    assert list(alerts["alert_type"]) == ["PRICE_SPIKE"]
+    assert alerts.iloc[0]["symbol"] == "SPY"
+    assert pd.Timestamp(alerts.iloc[0]["alert_time"]) == (
+        start + pd.Timedelta(minutes=30)
+    ).tz_localize(None)
+    assert str(alerts.iloc[0]["day"]) == "2026-11-09"
+    indicators = memory_sink.table("indicators_latest")
+    newest = indicators.sort_values("updated_at").iloc[-1]
+    assert newest["symbol"] == "SPY"
+    assert newest["close"] == 110.0
+    assert newest["zscore_30m"] > 10
