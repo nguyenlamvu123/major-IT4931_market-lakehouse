@@ -1,229 +1,328 @@
 {
-  "annotations": {
+  "uid": "market-overview",
+  "title": "Market Lakehouse: thị trường",
+  "tags": [
+    "btl-it4931",
+    "market-lakehouse"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
     "list": [
       {
-        "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
+        "name": "symbol",
+        "label": "Mã",
+        "type": "custom",
+        "query": "BTCUSDT,ETHUSDT,AAPL,MSFT,NVDA,SPY,GLD,TLT,IEF,SHY,GC=F,DXY",
+        "current": {
+          "text": "BTCUSDT",
+          "value": "BTCUSDT"
         },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
+        "options": [
+          {
+            "text": "BTCUSDT",
+            "value": "BTCUSDT",
+            "selected": true
+          },
+          {
+            "text": "ETHUSDT",
+            "value": "ETHUSDT",
+            "selected": false
+          },
+          {
+            "text": "AAPL",
+            "value": "AAPL",
+            "selected": false
+          },
+          {
+            "text": "MSFT",
+            "value": "MSFT",
+            "selected": false
+          },
+          {
+            "text": "NVDA",
+            "value": "NVDA",
+            "selected": false
+          },
+          {
+            "text": "SPY",
+            "value": "SPY",
+            "selected": false
+          },
+          {
+            "text": "GLD",
+            "value": "GLD",
+            "selected": false
+          },
+          {
+            "text": "TLT",
+            "value": "TLT",
+            "selected": false
+          },
+          {
+            "text": "IEF",
+            "value": "IEF",
+            "selected": false
+          },
+          {
+            "text": "SHY",
+            "value": "SHY",
+            "selected": false
+          },
+          {
+            "text": "GC=F",
+            "value": "GC=F",
+            "selected": false
+          },
+          {
+            "text": "DXY",
+            "value": "DXY",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "day",
+        "label": "Ngày (YYYY-MM-DD, trống = hôm nay)",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
       }
     ]
   },
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
-  "id": null,
-  "links": [],
+  "annotations": {
+    "list": []
+  },
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
       "id": 1,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(market_api_requests_total[5m]))",
-          "legendFormat": "requests/s",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "API request rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "up{job=\"market-api\"}",
-          "legendFormat": "market-api",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "API up",
-      "type": "stat"
-    },
-    {
+      "type": "stat",
+      "title": "Nguồn dữ liệu",
+      "description": "cassandra = dữ liệu thật; demo = dữ liệu tổng hợp (chỉ ở laptop); none = Cassandra mất kết nối.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "infinity"
       },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 10,
-        "w": 12,
         "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
+        "y": 0,
+        "w": 4,
+        "h": 4
       },
       "targets": [
         {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/health",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "cassandra",
+              "text": "cassandra",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "cassandra": {
+                  "color": "green",
+                  "index": 0
+                },
+                "demo": {
+                  "color": "orange",
+                  "index": 1
+                },
+                "none": {
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^source$/",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value"
+      },
+      "transformations": []
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Chỉ báo mới nhất (mọi mã)",
+      "description": "Bảng indicators_latest do speed layer (B) cập nhật mỗi micro-batch.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 20,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/indicators/latest",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "symbol",
+              "text": "Mã",
+              "type": "string"
+            },
+            {
+              "selector": "asset_class",
+              "text": "Lớp",
+              "type": "string"
+            },
+            {
+              "selector": "close",
+              "text": "Giá",
+              "type": "number"
+            },
+            {
+              "selector": "vwap",
+              "text": "VWAP",
+              "type": "number"
+            },
+            {
+              "selector": "return_1m",
+              "text": "Lợi suất 1m",
+              "type": "number"
+            },
+            {
+              "selector": "rsi_14",
+              "text": "RSI 14",
+              "type": "number"
+            },
+            {
+              "selector": "macd",
+              "text": "MACD",
+              "type": "number"
+            },
+            {
+              "selector": "zscore_30m",
+              "text": "Z-score 30m",
+              "type": "number"
+            },
+            {
+              "selector": "volatility_30m",
+              "text": "Biến động 30m",
+              "type": "number"
+            },
+            {
+              "selector": "window_start",
+              "text": "Nến",
+              "type": "timestamp"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "transformations": []
+    },
+    {
+      "id": 3,
+      "type": "candlestick",
+      "title": "Nến 1 phút realtime + VWAP: ${symbol}",
+      "description": "ohlcv_1m, phân vùng (symbol, day). Độ trễ mục tiêu dưới 10 giây (PDF việc B).",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 16,
+        "h": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/ohlcv?symbol=${symbol}&interval=1m&day=${day}&limit=390",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
           "columns": [
             {
               "selector": "window_start",
               "text": "time",
               "type": "timestamp"
-            },
-            {
-              "selector": "symbol",
-              "text": "symbol",
-              "type": "string"
             },
             {
               "selector": "open",
@@ -251,266 +350,506 @@
               "type": "number"
             },
             {
-              "selector": "rsi_14",
-              "text": "rsi_14",
+              "selector": "vwap",
+              "text": "vwap",
               "type": "number"
             }
-          ],
-          "format": "table",
-          "refId": "A",
-          "root_selector": "",
-          "source": "url",
-          "type": "json",
-          "url": "http://market-api:8000/api/v1/bars?symbol=${symbol}&limit=20",
-          "url_options": {
-            "method": "GET"
-          }
+          ]
         }
       ],
-      "title": "OHLCV bars - ${symbol}",
-      "type": "table"
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "candles+volume",
+        "candleStyle": "candles",
+        "colorStrategy": "open-close",
+        "includeAllFields": true,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "transformations": []
     },
     {
+      "id": 4,
+      "type": "table",
+      "title": "Cảnh báo trong ngày",
+      "description": "alerts_by_day: giá hoặc khối lượng lệch > 3 độ lệch chuẩn so với 30 phút trước.",
       "datasource": {
         "type": "yesoreyeram-infinity-datasource",
         "uid": "infinity"
       },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 11
       },
       "targets": [
         {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/alerts?day=${day}&limit=200",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
           "columns": [
             {
               "selector": "alert_time",
-              "text": "time",
+              "text": "Thời điểm",
               "type": "timestamp"
             },
             {
               "selector": "symbol",
-              "text": "symbol",
+              "text": "Mã",
               "type": "string"
             },
             {
               "selector": "alert_type",
-              "text": "type",
+              "text": "Loại",
               "type": "string"
             },
             {
               "selector": "severity",
-              "text": "severity",
+              "text": "Mức",
               "type": "string"
             },
             {
               "selector": "price",
-              "text": "price",
+              "text": "Giá",
               "type": "number"
             },
             {
-              "selector": "message",
-              "text": "message",
-              "type": "string"
+              "selector": "zscore",
+              "text": "Z giá",
+              "type": "number"
+            },
+            {
+              "selector": "volume_zscore",
+              "text": "Z khối lượng",
+              "type": "number"
             }
-          ],
-          "format": "table",
-          "refId": "A",
-          "root_selector": "",
-          "source": "url",
-          "type": "json",
-          "url": "http://market-api:8000/api/v1/alerts?symbol=${symbol}&limit=20",
-          "url_options": {
-            "method": "GET"
-          }
+          ]
         }
       ],
-      "title": "Alerts - ${symbol}",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "bytes"
-        },
+        "defaults": {},
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 18
-      },
+      "options": {},
+      "transformations": []
+    },
+    {
       "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+      "type": "candlestick",
+      "title": "Nến 5 phút: ${symbol}",
+      "description": "",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
           },
-          "editorMode": "code",
-          "expr": "process_resident_memory_bytes{job=\"market-api\"}",
-          "legendFormat": "market-api RSS",
-          "range": true,
-          "refId": "A"
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/ohlcv?symbol=${symbol}&interval=5m&day=${day}&limit=288",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "window_start",
+              "text": "time",
+              "type": "timestamp"
+            },
+            {
+              "selector": "open",
+              "text": "open",
+              "type": "number"
+            },
+            {
+              "selector": "high",
+              "text": "high",
+              "type": "number"
+            },
+            {
+              "selector": "low",
+              "text": "low",
+              "type": "number"
+            },
+            {
+              "selector": "close",
+              "text": "close",
+              "type": "number"
+            },
+            {
+              "selector": "volume",
+              "text": "volume",
+              "type": "number"
+            },
+            {
+              "selector": "vwap",
+              "text": "vwap",
+              "type": "number"
+            }
+          ]
         }
       ],
-      "title": "API memory",
-      "type": "timeseries"
-    }
-  ],
-  "refresh": "30s",
-  "schemaVersion": 39,
-  "tags": [
-    "market",
-    "btl"
-  ],
-  "templating": {
-    "list": [
-      {
-        "current": {
-          "selected": true,
-          "text": "BTCUSDT",
-          "value": "BTCUSDT"
-        },
-        "hide": 0,
-        "includeAll": false,
-        "label": "Symbol",
-        "multi": false,
-        "name": "symbol",
-        "options": [
-          {
-            "selected": true,
-            "text": "BTCUSDT",
-            "value": "BTCUSDT"
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "candles+volume",
+        "candleStyle": "candles",
+        "colorStrategy": "open-close",
+        "includeAllFields": true,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "transformations": []
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "So sánh tài sản theo ngày (đóng cửa = 100 ở ngày đầu)",
+      "description": "daily_summary của batch layer (C): cổ phiếu, vàng, trái phiếu, crypto, USD trên cùng thang.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
           },
-          {
-            "selected": false,
-            "text": "ETHUSDT",
-            "value": "ETHUSDT"
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/daily/compare?symbols=SPY,GLD,TLT,BTCUSDT,GC%3DF,DXY&limit=120",
+          "url_options": {
+            "method": "GET",
+            "data": ""
           },
-          {
-            "selected": false,
-            "text": "AAPL",
-            "value": "AAPL"
-          },
-          {
-            "selected": false,
-            "text": "GLD",
-            "value": "GLD"
-          },
-          {
-            "selected": false,
-            "text": "XAUUSD",
-            "value": "XAUUSD"
-          },
-          {
-            "selected": false,
-            "text": "DXY",
-            "value": "DXY"
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "day",
+                "destinationType": "time"
+              }
+            ]
           }
-        ],
-        "query": "BTCUSDT,ETHUSDT,AAPL,GLD,XAUUSD,DXY",
-        "queryValue": "",
-        "skipUrlSync": false,
-        "type": "custom"
-      }
-    ]
-  },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "Market Lakehouse - Overview",
-  "uid": "market-overview",
-  "version": 1,
-  "weekStart": ""
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Ma trận tương quan 90 ngày (lợi suất ngày; US2Y/US10Y/REAL10Y là thay đổi lợi suất)",
+      "description": "correlation_matrix, as_of mới nhất. Âm = ngược chiều (ví dụ GLD với REAL10Y, TLT với US10Y).",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 16,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/correlation?window_days=90&format=matrix",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": -1,
+          "max": 1,
+          "decimals": 2,
+          "color": {
+            "mode": "continuous-RdYlGr"
+          },
+          "custom": {
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "gradient"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "transformations": []
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Đường cong lợi suất mới nhất",
+      "description": "",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 28,
+        "w": 8,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/yield-curve/latest",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "tenor",
+              "text": "Kỳ hạn",
+              "type": "string"
+            },
+            {
+              "selector": "yield",
+              "text": "Lợi suất %",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Kỳ hạn",
+        "showValue": "always",
+        "orientation": "vertical"
+      },
+      "transformations": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Lợi suất 2Y, 10Y, thực 10Y và spread 10Y-2Y (âm = đảo ngược)",
+      "description": "",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 16,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/yield-curve?limit=365",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "day",
+              "text": "time",
+              "type": "timestamp"
+            },
+            {
+              "selector": "y_2y",
+              "text": "2Y",
+              "type": "number"
+            },
+            {
+              "selector": "y_10y",
+              "text": "10Y",
+              "type": "number"
+            },
+            {
+              "selector": "real_10y",
+              "text": "Thực 10Y",
+              "type": "number"
+            },
+            {
+              "selector": "spread_10y_2y",
+              "text": "Spread 10Y-2Y",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "transformations": []
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Phân cụm tài sản (MLlib KMeans)",
+      "description": "",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 40,
+        "w": 8,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/api/v1/clusters",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "symbol",
+              "text": "Mã",
+              "type": "string"
+            },
+            {
+              "selector": "asset_class",
+              "text": "Lớp",
+              "type": "string"
+            },
+            {
+              "selector": "cluster",
+              "text": "Cụm",
+              "type": "number"
+            },
+            {
+              "selector": "volatility",
+              "text": "Biến động",
+              "type": "number"
+            },
+            {
+              "selector": "corr_us10y",
+              "text": "Tương quan US10Y",
+              "type": "number"
+            },
+            {
+              "selector": "model",
+              "text": "Mô hình",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "transformations": []
+    }
+  ]
 }

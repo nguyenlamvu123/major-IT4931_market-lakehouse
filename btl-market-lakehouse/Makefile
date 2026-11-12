@@ -3,7 +3,7 @@ KUBECONFORM_CRDS := https://raw.githubusercontent.com/datreeio/CRDs-catalog/main
 
 .PHONY: help venv install samples demo test lint verify smoke \
 	dev-up dev-down topics cassandra-init minio-init api branches \
-	up down images images-local secrets status port-forward apply apps k8s-topics k8s-validate
+	up down images images-local secrets status port-forward apply apps k8s-topics k8s-validate dashboards
 
 help:
 	@echo "Laptop (no cluster):"
@@ -29,6 +29,7 @@ help:
 	@echo "  port-forward    Grafana :3000, API :8000, Airflow :8080, Prometheus :9090, MinIO :9001"
 	@echo "  k8s-topics      Regenerate KafkaTopic CRs from contracts/topics.yaml"
 	@echo "  k8s-validate    kustomize build + kubeconform (if installed)"
+	@echo "  dashboards      Regenerate Grafana dashboards (infra/scripts/build_dashboards.py)"
 
 venv:
 	$(PYTHON) -m venv .venv
@@ -108,8 +109,12 @@ apps:
 k8s-topics:
 	$(PYTHON) -m infra.scripts.gen_kafka_topics
 
+dashboards:
+	$(PYTHON) -m infra.scripts.build_dashboards
+
 k8s-validate:
 	$(PYTHON) -m infra.scripts.gen_kafka_topics --check
+	$(PYTHON) -m infra.scripts.build_dashboards --check
 	kustomize build --load-restrictor LoadRestrictionsNone infra/k8s > /tmp/btl-rendered.yaml
 	kubeconform -strict -summary -ignore-missing-schemas -schema-location default \
 		-schema-location '$(KUBECONFORM_CRDS)' /tmp/btl-rendered.yaml infra/k8s/spark/sparkapplication-template.yaml

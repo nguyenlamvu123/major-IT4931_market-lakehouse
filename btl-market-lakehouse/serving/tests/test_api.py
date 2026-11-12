@@ -176,3 +176,10 @@ def test_driver_values_become_utc_json() -> None:
             return "2026-11-09"
 
     assert _plain(DriverDate()) == "2026-11-09"
+
+
+def test_empty_day_means_default_day_and_bad_day_is_422() -> None:
+    client = _client(DownRepository(), fallback=True)
+    rows = client.get("/api/v1/ohlcv?symbol=SPY&day=").json()
+    assert rows[0]["day"] == "2026-11-09"
+    assert client.get("/api/v1/ohlcv?symbol=SPY&day=09-11-2026").status_code == 422

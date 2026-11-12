@@ -22,6 +22,7 @@ Call stack of a data request:
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -50,6 +51,19 @@ SOURCE_HEADER = "X-Data-Source"
 
 def _env_flag(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _day(value: str | None) -> str | None:
+    """Optional ``day`` query value; an empty string means "default day".
+
+    Grafana interpolates an unset ``${day}`` variable as ``day=``; treating it like an
+    absent parameter lets one dashboard URL serve both "today" and a chosen day.
+    """
+    if value is None or not value.strip():
+        return None
+    if not re.match(DAY_PATTERN, value.strip()):
+        raise HTTPException(status_code=422, detail=f"day must be YYYY-MM-DD, got {value!r}")
+    return value.strip()
 
 
 def _symbol(value: str) -> str:
@@ -149,13 +163,14 @@ def create_app(
     def ohlcv(
         request: Request,
         symbol: str = Query("BTCUSDT"),
-        day: str | None = Query(None, pattern=DAY_PATTERN),
+        day: str | None = Query(None),
         interval: str = Query("1m", pattern="^(1m|5m)$"),
         limit: int = Query(390, ge=1, le=1_440),
     ) -> list[dict[str, Any]]:
         symbol = _symbol(symbol)
+        chosen = _day(day)
         rows = _answer(
-            request, lambda repo: repo.ohlcv(symbol, day or repo.default_day(), interval, limit)
+            request, lambda repo: repo.ohlcv(symbol, chosen or repo.default_day(), interval, limit)
         )
         return views.ascending(rows, "window_start")
 
@@ -167,10 +182,11 @@ def create_app(
     @app.get("/api/v1/alerts")
     def alerts(
         request: Request,
-        day: str | None = Query(None, pattern=DAY_PATTERN),
+        day: str | None = Query(None),
         limit: int = Query(200, ge=1, le=2_000),
     ) -> list[dict[str, Any]]:
-        return _answer(request, lambda repo: repo.alerts(day or repo.default_day(), limit))
+        chosen = _day(day)
+        return _answer(request, lambda repo: repo.alerts(chosen or repo.default_day(), limit))
 
     @app.get("/api/v1/daily")
     def daily(

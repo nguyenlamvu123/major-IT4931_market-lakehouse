@@ -1,52 +1,61 @@
-# Monitoring and dashboards (role D)
+# Giám sát và dashboard (vai D)
 
-## Components
+PDF việc D.5 yêu cầu hai dashboard:
 
-- `prometheus.yml`: scrapes the API, Kafka exporter and Spark master.
-- `grafana/provisioning/`: datasource + dashboard provisioning for Compose and K8s.
-- `grafana/dashboards/market-overview.json`: OHLCV table, alerts table, API metrics.
-- `grafana/dashboards/infra-health.json`: scrape health, request rate, memory.
+- **Dashboard thị trường** (`market-overview.json`):
+  - Nến 1 phút realtime kèm VWAP, nến 5 phút.
+  - Bảng chỉ báo mới nhất, cảnh báo trong ngày.
+  - So sánh nhiều tài sản (giá đóng cửa quy về 100 ở ngày đầu).
+  - Ma trận tương quan 90 ngày, đường cong lợi suất, spread 10Y-2Y.
+  - Phân cụm MLlib, và một ô "Nguồn dữ liệu" cho biết đang xem dữ liệu thật hay demo.
+  - Đọc `market-api` qua plugin Infinity.
+- **Dashboard giám sát** (`infra-health.json`):
+  - Kafka consumer lag, tin nhắn vào mỗi giây theo topic.
+  - Producer: msg/s, lỗi, kết nối lại, dead-letter.
+  - Spark streaming: dòng vào/xử lý mỗi giây, offsets chưa đọc, thời gian micro-batch,
+    độ trễ từ giao dịch đến Cassandra (ngưỡng 10 s).
+  - CPU/RAM từng pod, RAM còn trống của máy, số lần pod khởi động lại, p95 của market-api.
+  - Nguồn: Prometheus.
 
-## Run with Compose
+## Sinh dashboard từ code
 
-```bash
-docker compose -f infra/docker-compose.full.yml up -d market-api prometheus grafana
-```
-
-Open Grafana at `http://localhost:3000` (`admin` / `admin` by default). The Infinity
-plugin is installed by Compose; the API is used as a JSON datasource.
-
-Build the API first from the project root:
-
-```bash
-docker build -f serving/Dockerfile -t btl/market-api .
-```
-
-## Run the API without Docker
+Hai file JSON được sinh bởi `infra/scripts/build_dashboards.py`. Không sửa tay; sửa
+script rồi chạy:
 
 ```bash
-pip install -r serving/requirements.txt
-uvicorn serving.market_api:app --port 8000
+make dashboards        # python -m infra.scripts.build_dashboards
+python -m pytest infra/tests/test_dashboards.py
 ```
 
-The API falls back to deterministic demo data when Cassandra is absent and retries
-the connection every 5 seconds.
+Test bắt các lỗi sau:
 
-## Prometheus queries
+- File JSON lệch so với script.
+- URL Infinity không có trong market-api, hoặc thiếu cột mà panel đọc (test gọi thật
+  từng URL lên API ở chế độ demo).
+- Metric `market_*` chưa khai báo trong `contracts/infra.yaml`.
 
-- `sum(rate(market_api_requests_total[5m]))` - request rate.
-- `process_resident_memory_bytes{job="market-api"}` - API memory.
-- `up{job="market-api"}` - API scrape health.
+## Nguồn metric
 
-## K8s
+| Metric | Nguồn | Cách thu |
+|---|---|---|
+| `kafka_consumergroup_lag`, `kafka_topic_partition_current_offset` | kafkaExporter của Strimzi (K8s), `kafka-exporter` (compose) | PodMonitor `kafka-exporter` |
+| `market_producer_*` | Producer vai A, cổng 8001 | PodMonitor `market-workloads` (label `btl.market/metrics=true`, port tên `metrics`) |
+| `market_speed_*` | Driver streaming vai B, cổng 9108 | PodMonitor `market-workloads` |
+| `market_api_*`, `process_*` | market-api | ServiceMonitor `market-api` |
+| `container_*`, `kube_pod_*`, `node_memory_*` | cAdvisor, kube-state-metrics, node-exporter (kube-prometheus-stack) | Chart tự cấu hình |
 
-`infra/k8s/kustomization.yaml` generates ConfigMaps from the provisioning files.
-`kubectl apply -k infra/k8s` mounts them into Grafana automatically.
+Spark Structured Streaming lưu offset trong checkpoint trên MinIO, không commit vào
+Kafka. Vì vậy `kafka_consumergroup_lag` chỉ đo được lag của Kafka Connect; lag của speed
+layer xem ở `market_speed_offsets_behind_latest`.
 
-## Limitations
+## Chạy
 
-- The dashboard's tables depend on the Infinity plugin; install it if running Grafana
-  outside the provided Compose/K8s manifests.
-- Kafka/Spark exporters are not deployed by the dev stack; those panels stay empty
-  until exporters are added.
-- No alert rules are provisioned; alerts are stored in Cassandra and shown as a table.
+- Compose: `docker compose -f infra/docker-compose.full.yml up -d`, rồi mở Grafana tại
+  http://localhost:3000 (admin/admin), thư mục "Market Lakehouse". Datasource được cấu
+  hình trong `grafana/provisioning/`.
+- K8s: `make up`. kube-prometheus-stack cài plugin Infinity và datasource `Market API`.
+  Sidecar nạp ConfigMap `grafana-dashboards-market` (sinh bằng kustomize từ chính hai
+  file JSON này).
+
+Datasource dùng uid cố định `prometheus` và `infinity` ở cả hai môi trường, và URL
+Infinity là đường dẫn tương đối, nên cùng một file JSON chạy được cả trên compose lẫn K8s.
