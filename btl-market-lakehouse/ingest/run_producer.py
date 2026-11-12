@@ -17,6 +17,7 @@ Examples::
     python -m ingest.run_producer --source binance
     python -m ingest.run_producer --source treasury --interval 3600
     python -m ingest.run_producer --source replay --speed 10 --rebase-time --loop
+    python -m ingest.run_producer --source backfill --years 5
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import os
 import signal
 import sys
 import threading
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +38,17 @@ if str(ROOT) not in sys.path:
 from ingest.config import ApiSettings, KafkaSettings  # noqa: E402
 from ingest.kafka_producer import build_producer  # noqa: E402
 
-SOURCES = ("mock", "replay", "binance", "alpaca", "finnhub", "yahoo", "fred", "treasury")
+SOURCES = (
+    "mock",
+    "replay",
+    "binance",
+    "alpaca",
+    "finnhub",
+    "yahoo",
+    "fred",
+    "treasury",
+    "backfill",
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -74,6 +86,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Seconds between polls (REST sources) or between records (mock)",
     )
     parser.add_argument("--alpaca-mode", choices=["ws", "rest"], default="ws")
+    parser.add_argument("--years", type=int, default=5, help="backfill: years of history")
+    parser.add_argument("--start", type=date.fromisoformat, default=None,
+                        help="backfill: first day (YYYY-MM-DD), overrides --years")
+    parser.add_argument("--end", type=date.fromisoformat, default=None,
+                        help="backfill: day after the last one (default today)")
     parser.add_argument(
         "--metrics-port",
         type=int,
@@ -151,6 +168,10 @@ def build_source(args: argparse.Namespace, kafka: object) -> object:
         from ingest.producers.treasury_csv import TreasuryYieldProducer
 
         return TreasuryYieldProducer(kafka, _interval(args, 3600.0))
+    if args.source == "backfill":
+        from ingest.backfill_yfinance import BackfillProducer
+
+        return BackfillProducer(kafka, symbols, start=args.start, end=args.end, years=args.years)
     raise ValueError(args.source)
 
 
