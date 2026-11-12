@@ -14,7 +14,7 @@ from typing import Any
 
 from common.contracts import INSTRUMENTS, make_trade
 
-from ..base import BaseProducer, KafkaSink, now_ms
+from ..base import BaseProducer, KafkaSink, MalformedPayload, now_ms
 
 DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT")
 DEFAULT_WS_BASE = "wss://stream.binance.com:9443"
@@ -25,6 +25,9 @@ def parse_binance_trade(
     ingest_time: int | None = None,
 ) -> dict[str, Any] | None:
     """Binance ``trade`` event -> contract trade, or None for other event types.
+
+    Raises :class:`MalformedPayload` for a ``trade`` event missing fields, so the
+    producer can send it to ``dead-letter`` instead of dropping it silently.
 
     Accepts both the raw stream payload and the combined-stream envelope
     ``{"stream": "...", "data": {...}}``. The exchange trade id ``t`` becomes
@@ -48,8 +51,8 @@ def parse_binance_trade(
             exchange_trade_id=data["t"],
             ingest_time=ingest_time if ingest_time is not None else now_ms(),
         )
-    except (KeyError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MalformedPayload(f"binance trade: {exc!r}") from exc
 
 
 def combined_stream_url(symbols: list[str], ws_base: str = DEFAULT_WS_BASE) -> str:
@@ -72,11 +75,15 @@ class BinanceProducer(BaseProducer):
 
     def handle_message(self, raw: str | bytes) -> int:
         """Publish the trade inside one websocket frame; return how many were sent."""
-        record = parse_binance_trade(json.loads(raw))
+        try:
+            payload = json.loads(raw)
+            record = parse_binance_trade(payload)
+        except (ValueError, AttributeError) as exc:  # bad JSON or MalformedPayload
+            self.dead_letter(str(raw), str(exc), "crypto.trades")
+            return 0
         if record is None:
             return 0
-        self.publish(record)
-        return 1
+        return 1 if self.publish(record) else 0
 
     async def consume(self, stop_event: threading.Event) -> None:
         import websockets
@@ -92,4 +99,4 @@ class BinanceProducer(BaseProducer):
                 self.handle_message(raw)
 
     def run(self, stop_event: threading.Event) -> None:
-        asyncio.run(self.consume(stop_event))
+        self.run_with_reconnect(self.consume, stop_event)

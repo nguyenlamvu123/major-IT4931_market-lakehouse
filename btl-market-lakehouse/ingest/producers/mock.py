@@ -67,6 +67,8 @@ def mock_records(rows: int, seed: int, days: int) -> list[dict[str, Any]]:
 
 class MockProducer(BaseProducer):
     source = "demo"
+    # --loop re-sends the same synthetic records on purpose.
+    dedupe_window = 0
 
     def __init__(
         self,

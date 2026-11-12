@@ -7,6 +7,7 @@ Call stack::
       -> parse_args
       -> build_producer (Kafka client or dry-run printer)
       -> build_source -> <Source>Producer
+      -> ProducerMetrics.serve(8001)         # Prometheus /metrics
       -> <Source>Producer.run(stop_event)   # until SIGTERM/SIGINT
       -> <Source>Producer.close()           # flush in-flight records
 
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -56,6 +58,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Seconds between polls (REST sources) or between records (mock/replay)",
     )
     parser.add_argument("--alpaca-mode", choices=["ws", "rest"], default="ws")
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=int(os.getenv("METRICS_PORT", "8001")),
+        help="Prometheus /metrics port (contract: 8001); 0 disables",
+    )
     parser.add_argument("--loop", action="store_true")
     return parser.parse_args(argv)
 
@@ -121,6 +129,8 @@ def main(argv: list[str] | None = None) -> None:
         settings = KafkaSettings(bootstrap=args.bootstrap, security_protocol=settings.security_protocol)
     kafka = build_producer(settings, dry_run=args.dry_run)
     source = build_source(args, kafka)
+    if args.metrics_port:
+        source.metrics.serve(args.metrics_port)  # type: ignore[attr-defined]
     stop_event = threading.Event()
 
     def stop(*_: object) -> None:

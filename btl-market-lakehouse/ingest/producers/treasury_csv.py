@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
@@ -49,6 +50,7 @@ def parse_treasury_csv(
     text: str,
     columns: dict[str, str],
     ingest_time: int | None = None,
+    on_reject: Callable[[Any, str], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Treasury CSV text -> contract rate records for the mapped columns.
 
@@ -71,8 +73,9 @@ def parse_treasury_csv(
             try:
                 records.append(make_rate(series_id, day, float(value), "treasury",
                                          ingest_time=ingest_time))
-            except ValueError:
-                continue
+            except ValueError as exc:
+                if on_reject is not None:
+                    on_reject({"day": day, "column": column, "value": value}, repr(exc))
     return records
 
 
@@ -122,6 +125,7 @@ class TreasuryYieldProducer(RatesPublisher):
         records: list[dict[str, Any]] = []
         for month in months_to_fetch(date.today(), self.lookback_days):
             records.extend(parse_treasury_csv(self._download(month, NOMINAL_TYPE),
-                                              NOMINAL_COLUMNS))
-            records.extend(parse_treasury_csv(self._download(month, REAL_TYPE), REAL_COLUMNS))
+                                              NOMINAL_COLUMNS, on_reject=self.reject))
+            records.extend(parse_treasury_csv(self._download(month, REAL_TYPE), REAL_COLUMNS,
+                                              on_reject=self.reject))
         return self.publish_new(records)

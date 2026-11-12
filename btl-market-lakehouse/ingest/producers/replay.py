@@ -12,6 +12,7 @@ from ..base import BaseProducer, KafkaSink
 
 class ReplayProducer(BaseProducer):
     source = "replay"
+    dedupe_window = 0
 
     def __init__(
         self,

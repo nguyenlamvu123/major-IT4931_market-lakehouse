@@ -112,11 +112,7 @@ class YahooProducer(BaseProducer):
 
     def poll_once(self) -> int:
         records = latest_quotes(self.download(), self.symbols)
-        for record in records:
-            self.publish(record)
-        return len(records)
+        return sum(1 for record in records if self.publish(record))
 
     def run(self, stop_event: threading.Event) -> None:
-        while not stop_event.is_set():
-            self.poll_once()
-            stop_event.wait(self.interval)
+        self.poll_forever(self.poll_once, self.interval, stop_event)
