@@ -1,81 +1,27 @@
-"""Tests for pure medallion transforms."""
+"""Pandas mirror of the silver trade rules (used by run_local_batch.py)."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from batch.transforms import build_correlations, build_curve, clean_trades, daily_bars
+from batch.transforms import clean_trades
+from common.contracts import make_trade
+
+EVENT_TIME = 1_788_273_000_000  # 2026-09-01T14:30:00Z
 
 
 def test_clean_trades_deduplicates_and_filters() -> None:
+    first = make_trade("AAPL", "equity", EVENT_TIME, 230.0, 2.0, "alpaca", exchange_trade_id=1)
     trades = pd.DataFrame(
         [
-            {
-                "trade_id": "same",
-                "symbol": "AAPL",
-                "asset_class": "equity",
-                "event_time": 1767364200000,
-                "price": 190.0,
-                "volume": 2.0,
-                "source": "test",
-            },
-            {
-                "trade_id": "same",
-                "symbol": "AAPL",
-                "asset_class": "equity",
-                "event_time": 1767364260000,
-                "price": 191.0,
-                "volume": 3.0,
-                "source": "test",
-            },
-            {
-                "trade_id": "bad",
-                "symbol": "AAPL",
-                "asset_class": "equity",
-                "event_time": 1767364320000,
-                "price": -1.0,
-                "volume": 1.0,
-                "source": "test",
-            },
+            first,
+            dict(first, ingest_time=2),  # re-sent copy
+            make_trade("AAPL", "equity", EVENT_TIME + 1, -1.0, 1.0, "alpaca", exchange_trade_id=2),
+            make_trade("US10Y", "rates", EVENT_TIME + 2, 4.1, 0.0, "alpaca", exchange_trade_id=3),
+            make_trade("bad sym", "equity", EVENT_TIME + 3, 1.0, 1.0, "alpaca", exchange_trade_id=4),
         ]
     )
     result = clean_trades(trades)
-    assert len(result) == 1
-    assert result.iloc[0]["price"] == 191.0
-    assert "event_date" in result.columns
-
-
-def _bars() -> pd.DataFrame:
-    rows = []
-    for symbol, offset in (("AAA", 0.0), ("BBB", 10.0)):
-        for day in range(1, 6):
-            for minute in range(2):
-                rows.append(
-                    {
-                        "symbol": symbol,
-                        "window_start": pd.Timestamp(f"2026-01-0{day}T10:0{minute}:00Z"),
-                        "open": 100.0 + offset + day,
-                        "high": 101.0 + offset + day,
-                        "low": 99.0 + offset + day,
-                        "close": 100.5 + offset + day,
-                        "volume": 10.0 + day,
-                        "vwap": 100.2 + offset + day,
-                    }
-                )
-    return pd.DataFrame(rows)
-
-
-def test_daily_correlation_and_curve() -> None:
-    daily = daily_bars(_bars())
-    assert len(daily) == 10
-    correlations = build_correlations(daily)
-    assert len(correlations) == 1
-
-    rates = pd.DataFrame(
-        [
-            {"day": "2026-01-02", "tenor": "2Y", "yield": 4.0},
-            {"day": "2026-01-02", "tenor": "10Y", "yield": 4.5},
-        ]
-    )
-    curve = build_curve(rates)
-    assert round(float(curve.iloc[0]["spread_10y_2y"]), 4) == 0.5
+    assert list(result["trade_id"]) == [first["trade_id"]]
+    assert result.iloc[0]["dt"] == "2026-09-01"
+    assert result.iloc[0]["event_time_ms"] == EVENT_TIME
