@@ -9,16 +9,10 @@ import pandas as pd
 import pytest
 
 from common.analytics import correlation_matrix, daily_summary, yield_curve
-from common.contracts import (
-    INSTRUMENTS,
-    SYNTHETIC_START,
-    TRADE_TOPICS,
-    synthetic_trades,
-    synthetic_yields,
-)
+from common.contracts import INSTRUMENTS, SYNTHETIC_START
 from common.ohlcv import aggregate_trades
 
-DAYS = 90
+DAYS = 90  # must match conftest.SYNTHETIC_DAYS
 FIRST_DAY = SYNTHETIC_START.date()
 LAST_DAY = FIRST_DAY + timedelta(days=DAYS - 1)
 
@@ -41,31 +35,8 @@ def _close(left, right) -> bool:
 
 
 @pytest.fixture(scope="module")
-def market():
-    trades = synthetic_trades(rows=4_000, seed=42, days=DAYS)
-    yields = synthetic_yields(days=DAYS, seed=42)
-    return trades, yields
-
-
-@pytest.fixture(scope="module")
-def silver_lake(spark, tmp_path_factory, bronze_writer, market):
-    from batch.lake import Lake, day_range
-    from batch.silver import build_silver, write_silver
-
-    trades, yields = market
-    root = tmp_path_factory.mktemp("gold") / "lake"
-    for topic in TRADE_TOPICS:
-        bronze_writer(root, topic, [r for r in trades if INSTRUMENTS[r["symbol"]].topic == topic])
-    bronze_writer(root, "rates.yields", yields)
-    lake = Lake(root.as_uri())
-    tables, stats = build_silver(spark, lake, day_range(FIRST_DAY, LAST_DAY))
-    write_silver(spark, lake, tables, stats)
-    return lake
-
-
-@pytest.fixture(scope="module")
-def reference(market):
-    trades, yields = market
+def reference(synthetic_market):
+    trades, yields = synthetic_market
     daily = daily_summary(aggregate_trades(pd.DataFrame(trades)))
     rates = pd.DataFrame(yields)
     return {
