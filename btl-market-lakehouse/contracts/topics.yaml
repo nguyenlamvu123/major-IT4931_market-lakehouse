@@ -63,7 +63,7 @@ topics:
     key: tenor
     schema: schemas/rate_yield.schema.json
     producer: A
-    sources: [fred, treasury]
+    sources: [fred, treasury]       # treasury: nominal par curve CSV + real yield curve CSV (DFII10)
   - name: alerts
     partitions: 3
     retention_ms: 259200000        # 3 days
