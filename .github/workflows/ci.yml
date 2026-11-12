@@ -1,0 +1,83 @@
+# CI (PDF mục 7.1, bước 7): ruff + pytest on every PR, plus infra validation.
+#
+# NOTICE: this file must live at the repository root (.github/workflows). The previous
+# btl-market-lakehouse/.github/workflows/ci.yml was never picked up by GitHub because
+# the project sits one directory below the git root; every step therefore runs in
+# btl-market-lakehouse/ via `defaults.run.working-directory`.
+name: ci
+
+on:
+  push:
+    branches: ["main", "feature/**", "integration", "instruction"]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: btl-market-lakehouse
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: btl-market-lakehouse/requirements.txt
+      # PySpark tests of B/C start a local JVM.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Ruff
+        run: ruff check .
+      - name: Pytest
+        run: python -m pytest
+      - name: Samples are in sync with the contract
+        run: |
+          python scripts/generate_samples.py
+          git diff --exit-code -- contracts/samples
+      - name: Local demo
+        run: |
+          python scripts/run_local_demo.py
+          python scripts/verify_pipeline.py
+
+  infra:
+    runs-on: ubuntu-latest
+    env:
+      KUSTOMIZE_VERSION: v5.4.3
+      KUBECONFORM_VERSION: v0.6.7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tools
+        run: |
+          pip install PyYAML
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin kustomize
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /usr/local/bin kubeconform
+      - name: Shell syntax
+        run: for script in infra/scripts/*.sh infra/fault_injection/*.sh scripts/*.sh; do bash -n "$script"; done
+      - name: Docker Compose config
+        run: |
+          docker compose -f infra/docker-compose.dev.yml config -q
+          docker compose -f infra/docker-compose.full.yml config -q
+      - name: Generated files are up to date
+        run: |
+          python -m infra.scripts.gen_kafka_topics --check
+          python -m infra.scripts.build_dashboards --check
+      - name: Kubernetes manifests (kustomize + kubeconform)
+        # -ignore-missing-schemas: the public CRD catalog has no schema for
+        # K8ssandraCluster; Strimzi, SparkApplication and Prometheus CRs are validated.
+        run: |
+          kustomize build --load-restrictor LoadRestrictionsNone infra/k8s > /tmp/rendered.yaml
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/rendered.yaml infra/k8s/spark/sparkapplication-template.yaml
