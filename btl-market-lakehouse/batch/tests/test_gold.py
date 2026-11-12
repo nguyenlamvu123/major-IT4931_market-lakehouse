@@ -135,11 +135,14 @@ def test_gold_partitions_and_ml_features(spark, silver_lake) -> None:
     days = [date(2026, 11, 25), LAST_DAY]
     write_gold(silver_lake, build_gold(spark, silver_lake, days))
 
-    for table in ("daily_summary", "correlation_matrix", "yield_curve", "ml_features"):
+    for table in ("daily_summary", "correlation_matrix", "ml_features"):
         written = read_gold(spark, silver_lake, table, days[0], days[-1])
         assert {row["dt"] for row in written.select("dt").distinct().collect()} <= set(days)
-    curve_days = read_gold(spark, silver_lake, "yield_curve", days[0], days[-1]).collect()
-    assert [row["day"] for row in curve_days] == [date(2026, 11, 25)]
+    # The yield curve is rewritten for the trailing YIELD_LATENCY_DAYS as well (late FRED
+    # publication): Friday 11-27 appears although only 11-25 and 11-29 were processed.
+    # Thanksgiving (11-26) and the weekend have no Treasury data.
+    curve = read_gold(spark, silver_lake, "yield_curve", days[0], days[-1]).collect()
+    assert sorted(row["day"] for row in curve) == [date(2026, 11, 25), date(2026, 11, 27)]
 
     features = read_gold(spark, silver_lake, "ml_features", LAST_DAY, LAST_DAY)
     by_symbol = {row["symbol"]: row for row in features.collect()}

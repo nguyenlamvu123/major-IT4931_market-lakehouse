@@ -19,7 +19,7 @@ from pyspark.sql import functions as F
 from common.analytics import TENOR_COLUMNS
 from common.contracts import YIELD_SYMBOLS
 
-from .lake import Lake, existing_paths
+from .lake import YIELD_LATENCY_DAYS, Lake, existing_paths
 from .silver import read_silver
 
 DAILY_COLUMNS = [
@@ -425,8 +425,9 @@ def build_gold(
     return {
         "daily_summary": daily.filter(F.col("day").isin(days)).withColumn("dt", F.col("day")),
         "correlation_matrix": correlations,
+        # Trailing window: yields arrive a business day late (see YIELD_LATENCY_DAYS).
         "yield_curve": build_yield_curve(yields)
-        .filter(F.col("day").isin(days))
+        .filter(_in_days("day", first - timedelta(days=YIELD_LATENCY_DAYS), last))
         .withColumn("dt", F.col("day")),
         "ml_features": build_ml_features(daily, correlations, days, window_days=window_days),
     }
