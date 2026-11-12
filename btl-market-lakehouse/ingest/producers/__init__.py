@@ -1,3 +1,12 @@
-"""Producer implementations."""
+"""Producer implementations, one module per market-data source."""
 
-__all__ = ["mock", "replay", "binance_ws", "alpaca", "finnhub", "yahoo", "treasury_fred"]
+__all__ = [
+    "alpaca",
+    "binance_ws",
+    "finnhub",
+    "mock",
+    "replay",
+    "treasury_csv",
+    "treasury_fred",
+    "yahoo",
+]

@@ -1,27 +1,21 @@
-"""Replay a JSONL file into Kafka with optional pacing."""
+"""Replay a JSONL file of contract records into Kafka with fixed pacing."""
 
 from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any
 
-from common.contracts import topic_for
 from common.io_utils import read_jsonl
 
-from ..base import BaseProducer
-
-
-def topic_for_record(record: dict[str, Any]) -> str:
-    if "tenor" in record and "yield" in record:
-        return "rates.ticks"
-    return topic_for(str(record.get("asset_class", "equity")), "trades")
+from ..base import BaseProducer, KafkaSink
 
 
 class ReplayProducer(BaseProducer):
+    source = "replay"
+
     def __init__(
         self,
-        kafka: Any,
+        kafka: KafkaSink,
         path: str | Path,
         interval: float = 0.0,
         loop: bool = False,
@@ -35,10 +29,9 @@ class ReplayProducer(BaseProducer):
         records = read_jsonl(self.path)
         while not stop_event.is_set():
             for record in records:
-                key = str(record.get("symbol") or record.get("tenor") or "unknown")
-                if not self.emit(
-                    topic_for_record(record), key, record, stop_event, self.interval
-                ):
+                # Topic and key come from the contract (topic_for_record), so one file
+                # may mix trades, bars and yields.
+                if not self.publish_paced(record, stop_event, self.interval):
                     return
             if not self.loop:
                 return

@@ -1,4 +1,9 @@
-"""Binance public websocket trade stream."""
+"""Binance public trade stream (crypto, 24/7) -> ``crypto.trades``.
+
+One combined-stream connection carries every symbol
+(``/stream?streams=btcusdt@trade/ethusdt@trade``), so adding a pair does not add a
+socket. No API key is needed.
+"""
 
 from __future__ import annotations
 
@@ -7,55 +12,84 @@ import json
 import threading
 from typing import Any
 
-from common.contracts import make_trade
+from common.contracts import INSTRUMENTS, make_trade
 
-from ..base import BaseProducer
+from ..base import BaseProducer, KafkaSink, now_ms
+
+DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT")
+DEFAULT_WS_BASE = "wss://stream.binance.com:9443"
 
 
-def parse_binance_trade(payload: dict[str, Any]) -> dict[str, Any] | None:
-    if payload.get("e") != "trade":
+def parse_binance_trade(
+    payload: dict[str, Any],
+    ingest_time: int | None = None,
+) -> dict[str, Any] | None:
+    """Binance ``trade`` event -> contract trade, or None for other event types.
+
+    Accepts both the raw stream payload and the combined-stream envelope
+    ``{"stream": "...", "data": {...}}``. The exchange trade id ``t`` becomes
+    ``exchange_trade_id`` so a trade re-sent after a reconnect keeps the same
+    ``trade_id`` while two genuine trades with equal price/size stay distinct.
+    """
+    data = payload.get("data", payload)
+    if data.get("e") != "trade":
         return None
     try:
+        symbol = str(data["s"]).upper()
+        instrument = INSTRUMENTS.get(symbol)
         return make_trade(
-            symbol=str(payload["s"]).upper(),
-            asset_class="crypto",
-            event_time=int(payload["T"]),
-            price=float(payload["p"]),
-            volume=float(payload["q"]),
+            symbol=symbol,
+            # Pairs outside the registry (passed via --symbols) are still crypto.
+            asset_class=instrument.asset_class if instrument else "crypto",
+            event_time=int(data["T"]),
+            price=float(data["p"]),
+            volume=float(data["q"]),
             source="binance",
-            metadata={"trade_id_exchange": payload.get("t")},
+            exchange_trade_id=data["t"],
+            ingest_time=ingest_time if ingest_time is not None else now_ms(),
         )
     except (KeyError, TypeError, ValueError):
         return None
 
 
+def combined_stream_url(symbols: list[str], ws_base: str = DEFAULT_WS_BASE) -> str:
+    streams = "/".join(f"{symbol.lower()}@trade" for symbol in symbols)
+    return f"{ws_base.rstrip('/')}/stream?streams={streams}"
+
+
 class BinanceProducer(BaseProducer):
+    source = "binance"
+
     def __init__(
         self,
-        kafka: Any,
-        symbols: list[str],
-        ws_base: str = "wss://stream.binance.com:9443/ws",
+        kafka: KafkaSink,
+        symbols: list[str] | None = None,
+        ws_base: str = DEFAULT_WS_BASE,
     ) -> None:
         super().__init__(kafka)
-        self.symbols = [symbol.upper() for symbol in symbols]
-        self.ws_base = ws_base.rstrip("/")
+        self.symbols = [symbol.upper() for symbol in (symbols or DEFAULT_SYMBOLS)]
+        self.url = combined_stream_url(self.symbols, ws_base)
 
-    async def _consume(self, symbol: str, stop_event: threading.Event) -> None:
+    def handle_message(self, raw: str | bytes) -> int:
+        """Publish the trade inside one websocket frame; return how many were sent."""
+        record = parse_binance_trade(json.loads(raw))
+        if record is None:
+            return 0
+        self.publish(record)
+        return 1
+
+    async def consume(self, stop_event: threading.Event) -> None:
         import websockets
 
-        url = f"{self.ws_base}/{symbol.lower()}@trade"
-        async with websockets.connect(url, ping_interval=20) as websocket:
+        # Binance pings every 3 minutes and drops silent clients; the library answers
+        # pings automatically, ping_interval adds our own keep-alive on top.
+        async with websockets.connect(self.url, ping_interval=20) as websocket:
             while not stop_event.is_set():
                 try:
                     raw = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
-                record = parse_binance_trade(json.loads(raw))
-                if record is not None:
-                    self.kafka.send("crypto.trades", record["symbol"], record)
-
-    async def _run_async(self, stop_event: threading.Event) -> None:
-        await asyncio.gather(*(self._consume(symbol, stop_event) for symbol in self.symbols))
+                self.handle_message(raw)
 
     def run(self, stop_event: threading.Event) -> None:
-        asyncio.run(self._run_async(stop_event))
+        asyncio.run(self.consume(stop_event))
