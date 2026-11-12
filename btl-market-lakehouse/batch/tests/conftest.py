@@ -82,7 +82,7 @@ def lake_dir(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def bronze_writer():
     """Fixture form of :func:`write_bronze` (conftest modules are not importable)."""
     return write_bronze
