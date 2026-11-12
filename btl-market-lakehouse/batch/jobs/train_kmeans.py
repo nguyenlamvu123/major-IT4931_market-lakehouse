@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Cluster assets by return/volatility/volume using Spark MLlib KMeans."""
+"""Cluster assets with Spark MLlib KMeans and publish the result (gold + Cassandra).
+
+Call stack:
+
+main
+  -> batch.gold.read_gold            gold/ml_features/dt=<day>/
+  -> batch.ml.train_clusters         StandardScaler + KMeans per day, silhouette score
+  -> write gold/asset_clusters/dt=<day>/
+  -> batch.cassandra_sink.write      market.asset_clusters (skipped with --dry-run)
+
+Runs after cassandra_sink in the nightly DAG, so it publishes its own table.
+
+Example::
+
+    python batch/jobs/train_kmeans.py --lake s3a://lake --dt 2026-11-09 --k 3
+"""
 
 from __future__ import annotations
 
@@ -10,65 +25,39 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from pyspark.ml import Pipeline  # noqa: E402
-from pyspark.ml.clustering import KMeans  # noqa: E402
-from pyspark.ml.evaluation import ClusteringEvaluator  # noqa: E402
-from pyspark.ml.feature import StandardScaler, VectorAssembler  # noqa: E402
-
-from batch.ml_features import symbol_features  # noqa: E402
+from batch.cassandra_sink import CassandraSettings, write  # noqa: E402
+from batch.gold import read_gold  # noqa: E402
+from batch.lake import Lake, add_day_arguments, days_from_args  # noqa: E402
+from batch.ml import train_clusters  # noqa: E402
 from batch.spark_session import build_spark  # noqa: E402
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train asset clusters")
-    parser.add_argument("--gold", default="s3a://lake/gold")
-    parser.add_argument("--k", type=int, default=3)
-    parser.add_argument("--evaluate", action="store_true")
-    parser.add_argument("--minio-endpoint", default="")
-    parser.add_argument("--access-key", default="")
-    parser.add_argument("--secret-key", default="")
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
+    parser = argparse.ArgumentParser(description="Train asset clusters (KMeans)")
+    add_day_arguments(parser)
+    parser.add_argument("--k", type=int, default=3)
+    parser.add_argument("--dry-run", action="store_true", help="skip the Cassandra write")
+    args = parser.parse_args()
+    days = days_from_args(args)
+
+    settings = CassandraSettings.from_env()
     spark = build_spark(
         "train-asset-clusters",
-        minio_endpoint=args.minio_endpoint,
-        access_key=args.access_key,
-        secret_key=args.secret_key,
+        master=args.master,
+        extra_conf={} if args.dry_run else settings.spark_conf(),
     )
-    daily = spark.read.parquet(f"{args.gold}/daily_bars").toPandas()
-    features = symbol_features(daily)
-    if features.empty:
-        raise SystemExit("No features: run silver_to_gold.py first")
+    lake = Lake(args.lake)
+    features = read_gold(spark, lake, "ml_features", days[0], days[-1])
+    clusters = train_clusters(features, k=args.k).cache()
+    if clusters.limit(1).count() == 0:
+        raise SystemExit("no usable ml_features rows: run silver_to_gold first")
 
-    spark_df = spark.createDataFrame(features)
-    assembler = VectorAssembler(
-        inputCols=["mean_return", "volatility", "avg_volume"],
-        outputCol="raw_features",
-    )
-    scaler = StandardScaler(
-        inputCol="raw_features",
-        outputCol="features",
-        withMean=True,
-        withStd=True,
-    )
-    kmeans = KMeans(featuresCol="features", predictionCol="cluster", k=args.k, seed=42)
-    pipeline = Pipeline(stages=[assembler, scaler, kmeans])
-    model = pipeline.fit(spark_df)
-    predictions = model.transform(spark_df).select(
-        "symbol", "mean_return", "volatility", "avg_volume", "cluster"
-    )
-    predictions.write.mode("overwrite").parquet(f"{args.gold}/asset_clusters")
-
-    if args.evaluate:
-        evaluator = ClusteringEvaluator(
-            featuresCol="features", predictionCol="cluster", metricName="silhouette"
-        )
-        print(f"silhouette={evaluator.evaluate(model.transform(spark_df)):.4f}")
-
-    print(f"clusters written to {args.gold}/asset_clusters")
+    clusters.write.mode("overwrite").partitionBy("dt").parquet(lake.gold("asset_clusters"))
+    for row in clusters.select("dt", "silhouette").distinct().orderBy("dt").collect():
+        print(f"dt={row['dt']} silhouette={row['silhouette']:.4f}")
+    if not args.dry_run:
+        write(clusters, "asset_clusters", settings)
+        print(f"asset_clusters written to {settings.keyspace}.asset_clusters")
 
 
 if __name__ == "__main__":
