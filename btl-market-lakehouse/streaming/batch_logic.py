@@ -42,9 +42,7 @@ def alert_rows(alerts: list[dict[str, Any]]) -> pd.DataFrame:
     return frame[ALERT_COLUMNS].reset_index(drop=True)
 
 
-def enrich_batch(
-    bars: pd.DataFrame, updated_at: pd.Timestamp
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def enrich_batch(bars: pd.DataFrame, updated_at: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Indicators + alerts computed on the bars of one micro-batch only."""
     if bars is None or bars.empty:
         return pd.DataFrame(columns=INDICATOR_COLUMNS), pd.DataFrame(columns=ALERT_COLUMNS)

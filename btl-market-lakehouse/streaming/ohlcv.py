@@ -42,12 +42,14 @@ def read_files(
     topics: list[str],
     max_files_per_trigger: int = 1,
 ) -> DataFrame:
-    """Stream ``<input_dir>/<topic>.jsonl`` files (week-1 mode on contract samples).
+    """Stream ``<input_dir>/<topic>*.jsonl`` files (week-1 mode on contract samples).
 
     Only the trade-schema topics are matched by the glob, so ``stocks.bars.jsonl`` or
-    ``rates.yields.jsonl`` in the same directory are never parsed as trades.
+    ``rates.yields.jsonl`` in the same directory are never parsed as trades. The ``*``
+    lets a topic be split over several files (``crypto.trades-2.jsonl``) that arrive in
+    later micro-batches.
     """
-    pattern = f"{input_dir.rstrip('/')}/{{{','.join(topics)}}}.jsonl"
+    pattern = f"{input_dir.rstrip('/')}/{{{','.join(topics)}}}*.jsonl"
     return (
         spark.readStream.schema(TRADE_SCHEMA)
         .option("maxFilesPerTrigger", str(max_files_per_trigger))
@@ -79,9 +81,7 @@ def dedupe_trades(trades: DataFrame, watermark: str) -> DataFrame:
     watermark passes its event time, so duplicates arriving within the watermark delay
     are dropped and the state stays bounded.
     """
-    return trades.withWatermark("event_ts", watermark).dropDuplicatesWithinWatermark(
-        ["trade_id"]
-    )
+    return trades.withWatermark("event_ts", watermark).dropDuplicatesWithinWatermark(["trade_id"])
 
 
 def aggregate_ohlcv(trades: DataFrame, window_duration: str = "1 minute") -> DataFrame:
