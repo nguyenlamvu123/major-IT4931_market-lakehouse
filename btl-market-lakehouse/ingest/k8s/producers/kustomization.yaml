@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ingest-config.yaml
+- metrics.yaml
+- producer-alpaca.yaml
+- producer-backfill-job.yaml
+- producer-binance.yaml
+- producer-finnhub.yaml
+- producer-rates-fred.yaml
+- producer-rates.yaml
+- producer-replay.yaml
+- producer-yahoo.yaml
