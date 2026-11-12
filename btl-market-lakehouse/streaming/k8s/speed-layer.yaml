@@ -1,0 +1,148 @@
+# Speed layer on Kubernetes (role B): one long-running SparkApplication handled by the
+# Spark Operator in namespace "spark" (contract: contracts/infra.yaml).
+#
+#   kubectl apply -f streaming/k8s/speed-layer.yaml
+#   kubectl -n spark get sparkapplication speed-layer
+#   kubectl -n spark logs -l spark-role=driver,sparkoperator.k8s.io/app-name=speed-layer -f
+#
+# Prerequisites (D): Spark Operator watching "spark", service account
+# spark-operator-spark, secret minio-credentials in "spark", bucket "checkpoints".
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: speed-layer
+  namespace: spark
+  labels:
+    app.kubernetes.io/name: speed-layer
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: speed-layer
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: btl/streaming:dev
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: local:///opt/app/streaming/job.py
+  sparkVersion: "3.5.3"
+  arguments:
+    - --source
+    - kafka
+    - --bootstrap
+    - market-kafka-bootstrap.kafka.svc:9092
+    - --starting-offsets
+    - latest
+    - --trigger
+    - 5 seconds
+    - --watermark
+    - 30 seconds
+    - --checkpoint-root
+    - s3a://checkpoints
+    - --cassandra-host
+    - market-dc1-service.cassandra.svc
+    - --metrics-port
+    - "9108"
+  # A streaming job must never stay down: the driver is recreated after a crash or a
+  # deleted pod and both queries resume from s3a://checkpoints/<query>/.
+  restartPolicy:
+    type: Always
+    onFailureRetryInterval: 10
+    onSubmissionFailureRetryInterval: 20
+  sparkConf:
+    spark.sql.session.timeZone: UTC
+    spark.sql.shuffle.partitions: "6"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.cassandra.connection.host: market-dc1-service.cassandra.svc
+    spark.cassandra.connection.port: "9042"
+    # Spark's own metrics: executor/driver JVM and streaming query rates on the driver UI
+    # (:4040/metrics/prometheus) next to the contract gauges on :9108.
+    spark.ui.prometheus.enabled: "true"
+    spark.sql.streaming.metricsEnabled: "true"
+    spark.metrics.namespace: market_speed
+    spark.metrics.conf.*.sink.prometheusServlet.class: org.apache.spark.metrics.sink.PrometheusServlet
+    spark.metrics.conf.*.sink.prometheusServlet.path: /metrics/prometheus
+  driver:
+    cores: 1
+    coreLimit: 1200m
+    memory: 1g
+    serviceAccount: spark-operator-spark
+    labels:
+      app.kubernetes.io/name: speed-layer
+      app.kubernetes.io/component: driver
+    ports:
+      - name: metrics
+        containerPort: 9108
+        protocol: TCP
+    env:
+      # job.py turns these into spark.hadoop.fs.s3a.* settings; Spark ships them to the
+      # executors, which write the state store under the same checkpoint.
+      - name: MINIO_ENDPOINT
+        value: http://minio.minio.svc:9000
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_ACCESS_KEY
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_SECRET_KEY
+      - name: KAFKA_BOOTSTRAP
+        value: market-kafka-bootstrap.kafka.svc:9092
+      - name: CASSANDRA_HOSTS
+        value: market-dc1-service.cassandra.svc
+      - name: CASSANDRA_KEYSPACE
+        value: market
+  executor:
+    instances: 1
+    cores: 1
+    coreLimit: 1200m
+    memory: 1g
+    labels:
+      app.kubernetes.io/name: speed-layer
+      app.kubernetes.io/component: executor
+---
+# Stable name for the driver's metrics port (kubectl port-forward, ad-hoc curl).
+apiVersion: v1
+kind: Service
+metadata:
+  name: speed-layer-metrics
+  namespace: spark
+  labels:
+    app.kubernetes.io/name: speed-layer
+spec:
+  selector:
+    sparkoperator.k8s.io/app-name: speed-layer
+    spark-role: driver
+  ports:
+    - name: metrics
+      port: 9108
+      targetPort: 9108
+    - name: spark-ui
+      port: 4040
+      targetPort: 4040
+---
+# Scraped by kube-prometheus-stack in namespace "monitoring". The release label matches
+# the chart's default podMonitorSelector; D can drop it if the selector is disabled.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: speed-layer
+  namespace: spark
+  labels:
+    app.kubernetes.io/name: speed-layer
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      sparkoperator.k8s.io/app-name: speed-layer
+      spark-role: driver
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+    - port: spark-ui
+      path: /metrics/prometheus
+      interval: 30s
