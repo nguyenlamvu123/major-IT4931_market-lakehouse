@@ -87,6 +87,31 @@ ALERTS_COLUMNS = [
     "dt",
 ]
 
+#: Silver schemas as DDL, used to build empty frames when a table has no data yet
+#: (e.g. no stocks.bars were ever produced) so gold jobs do not fail on a missing path.
+SILVER_DDL = {
+    "trades": (
+        "trade_id string, topic string, symbol string, asset_class string, source string, "
+        "exchange_trade_id string, event_time timestamp, event_time_ms long, "
+        "ingest_time long, price double, volume double, dt date"
+    ),
+    "bars": (
+        "bar_id string, symbol string, asset_class string, timeframe string, source string, "
+        "event_time timestamp, event_time_ms long, ingest_time long, open double, "
+        "high double, low double, close double, volume double, vwap double, "
+        "trade_count long, dt date"
+    ),
+    "yields": (
+        "series_id string, tenor string, day date, event_time timestamp, yield double, "
+        "source string, ingest_time long, dt date"
+    ),
+    "alerts": (
+        "alert_id string, symbol string, asset_class string, alert_time timestamp, "
+        "day date, alert_type string, severity string, price double, zscore double, "
+        "volume_zscore double, message string, dt date"
+    ),
+}
+
 #: Directory name pattern written by the Kafka Connect TimeBasedPartitioner.
 _BRONZE_DT_RE = r"dt=(\d{4}-\d{2}-\d{2})"
 
@@ -382,3 +407,20 @@ def write_silver(
             .partitionBy("dt")
             .json(lake.silver("_stats"))
         )
+
+
+def read_silver(
+    spark: SparkSession, lake: Lake, table: str, first: date, last: date
+) -> DataFrame:
+    """Read silver ``table`` for ``first <= dt <= last``.
+
+    The filter is on the ``dt`` partition column, so Spark prunes whole directories
+    instead of scanning the table (measured in jobs/benchmark.py).
+    """
+    columns = [item.split()[0] for item in SILVER_DDL[table].split(", ")]
+    if not existing_paths(spark, [lake.silver(table)]):
+        return spark.createDataFrame([], SILVER_DDL[table])
+    # An explicit schema skips Parquet footer inference and also works for a table
+    # directory that exists but holds no files yet (a day that produced zero rows).
+    frame = spark.read.schema(SILVER_DDL[table]).parquet(lake.silver(table))
+    return frame.filter(F.col("dt").between(F.lit(first), F.lit(last))).select(columns)
