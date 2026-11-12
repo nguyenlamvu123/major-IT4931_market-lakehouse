@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def input_dir(tmp_path: Path) -> Path:
 
 
 def _run(spark, input_dir: Path, tmp_path: Path, sink, extra: list[str] | None = None):
-    from streaming.job import SpeedLayer, parse_args, start_query
+    from streaming.job import SpeedLayer, parse_args, start_queries
 
     args = parse_args(
         [
@@ -46,37 +47,33 @@ def _run(spark, input_dir: Path, tmp_path: Path, sink, extra: list[str] | None =
             "files",
             "--input",
             str(input_dir),
-            "--max-files-per-trigger",
-            "4",
             "--checkpoint-root",
             str(tmp_path / "checkpoints"),
             "--available-now",
-            *(extra or []),
+            *(extra or ["--max-files-per-trigger", "4"]),
         ]
     )
-    query = start_query(spark, args, SpeedLayer(spark, sink))
-    query.awaitTermination(180)
-    assert query.exception() is None
+    for query in start_queries(spark, args, SpeedLayer(spark, sink)):
+        query.awaitTermination(180)
+        assert query.exception() is None
     return args
 
 
-def test_file_mode_bars_match_pandas_reference(spark, memory_sink, input_dir, tmp_path) -> None:
-    _run(spark, input_dir, tmp_path, memory_sink)
-    bars = memory_sink.table("ohlcv_1m")
-    assert not bars.empty
-    assert bars["symbol"].isin(["BTCUSDT", "AAPL", "GC=F", "DXY"]).any()
-    # Non-trade sample files (bars, yields, alerts) never become trades.
-    assert bars["trade_count"].sum() <= len(_sample_trades())
-
-    reference = aggregate_trades(_sample_trades(), "1min").set_index(["symbol", "window_start"])
-    latest = (
-        bars.assign(window_start=pd.to_datetime(bars["window_start"], utc=True))
-        .sort_values("updated_at")
+def _final_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Latest upsert per primary key, i.e. what Cassandra would hold."""
+    return (
+        frame.assign(window_start=pd.to_datetime(frame["window_start"], utc=True))
+        .sort_values("updated_at", kind="stable")
         .groupby(["symbol", "window_start"])
         .tail(1)
         .set_index(["symbol", "window_start"])
+        .sort_index()
     )
-    for key, row in latest.iterrows():
+
+
+def _assert_bars_match(actual: pd.DataFrame, reference: pd.DataFrame, minutes: int) -> None:
+    assert list(actual.index) == list(reference.index)
+    for key, row in actual.iterrows():
         expected = reference.loc[key]
         assert row["open"] == expected["open"], key
         assert row["high"] == expected["high"], key
@@ -90,8 +87,67 @@ def test_file_mode_bars_match_pandas_reference(spark, memory_sink, input_dir, tm
         else:
             assert row["vwap"] == pytest.approx(expected["vwap"]), key
         assert row["day"] == key[1].date()
-        assert row["window_end"] == (key[1] + pd.Timedelta(minutes=1)).tz_localize(None)
+        assert row["window_end"] == (key[1] + pd.Timedelta(minutes=minutes)).tz_localize(None)
         assert row["asset_class"] == expected["asset_class"]
+
+
+def test_update_mode_emits_every_bar_including_open_ones(
+    spark, memory_sink, input_dir, tmp_path
+) -> None:
+    _run(spark, input_dir, tmp_path, memory_sink)
+    trades = _sample_trades()
+
+    one_minute = _final_rows(memory_sink.table("ohlcv_1m"))
+    reference_1m = aggregate_trades(trades, "1min").set_index(["symbol", "window_start"])
+    # Append mode would hold back the bars within 30 s of the newest trade; update mode
+    # writes all of them, so the final table equals the batch reference exactly.
+    _assert_bars_match(one_minute, reference_1m.sort_index(), minutes=1)
+
+    five_minutes = _final_rows(memory_sink.table("ohlcv_5m"))
+    reference_5m = aggregate_trades(trades, "5min").set_index(["symbol", "window_start"])
+    _assert_bars_match(five_minutes, reference_5m.sort_index(), minutes=5)
+
+
+def test_partial_bar_is_upserted_when_more_trades_arrive(spark, memory_sink, tmp_path) -> None:
+    lines = (SAMPLES / "crypto.trades.jsonl").read_text(encoding="utf-8").splitlines()
+    btc = [line for line in lines if json.loads(line)["symbol"] == "BTCUSDT"]
+    assert btc, "sample must contain a BTC trade"
+    # Split the first BTC minute: the opening trade arrives alone, a later trade of the
+    # same minute arrives in the next micro-batch.
+    opening = json.loads(btc[0])
+    later = dict(
+        opening,
+        trade_id="f" * 16,
+        event_time=opening["event_time"] + 30_000,
+        price=opening["price"] * 1.01,
+        volume=2.0,
+    )
+    input_dir = tmp_path / "split"
+    input_dir.mkdir()
+    part_one = input_dir / "crypto.trades-1.jsonl"
+    part_two = input_dir / "crypto.trades-2.jsonl"
+    part_one.write_text(json.dumps(opening) + "\n", encoding="utf-8")
+    part_two.write_text(json.dumps(later) + "\n", encoding="utf-8")
+    # The file source orders files by modification time.
+    os.utime(part_one, (1_000_000_000, 1_000_000_000))
+    os.utime(part_two, (1_000_000_100, 1_000_000_100))
+
+    _run(
+        spark,
+        input_dir,
+        tmp_path,
+        memory_sink,
+        ["--max-files-per-trigger", "1", "--queries", "speed-ohlcv-1m"],
+    )
+    writes = memory_sink.table("ohlcv_1m")
+    first_bar = writes[writes["symbol"] == "BTCUSDT"].sort_values("updated_at")
+    assert len(first_bar) == 2  # written as soon as it opened, then upserted
+    assert first_bar.iloc[0]["trade_count"] == 1
+    final = first_bar.iloc[-1]
+    assert final["trade_count"] == 2
+    assert final["open"] == opening["price"]
+    assert final["close"] == later["price"]
+    assert final["volume"] == pytest.approx(opening["volume"] + 2.0)
 
 
 def test_dxy_bars_have_null_vwap(spark, memory_sink, input_dir, tmp_path) -> None:

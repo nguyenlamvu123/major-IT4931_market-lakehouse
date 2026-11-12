@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
-"""Speed layer entrypoint: trades -> 1-minute OHLCV -> indicators/alerts -> sinks.
+"""Speed layer entrypoint: trades -> 1m/5m OHLCV -> indicators/alerts -> sinks.
 
-Call stack::
+Two independent streaming queries read the same trade topics, each with its own
+checkpoint under ``s3a://checkpoints/<query>/``:
 
     main
-      -> trade_stream (read_kafka | read_files -> clean_trades -> dedupe_trades)
-      -> aggregate_ohlcv  (1 minute, event time)
-      -> writeStream.foreachBatch(SpeedLayer.process_bars)
-           -> Sink.write("ohlcv_1m")
-           -> enrich_batch -> Sink.write("indicators_latest" / "alerts_by_day")
-           -> KafkaAlertPublisher.publish  (topic "alerts")
+      -> start_queries
+           -> trade_stream (read_kafka | read_files -> clean_trades -> dedupe_trades)
+           -> aggregate_ohlcv("1 minute")  -> foreachBatch(SpeedLayer.handler(1m))
+                -> Sink.write("ohlcv_1m") -> enrich_batch
+                -> Sink.write("indicators_latest" / "alerts_by_day")
+                -> KafkaAlertPublisher.publish (topic "alerts")
+           -> aggregate_ohlcv("5 minutes") -> foreachBatch(SpeedLayer.handler(5m))
+                -> Sink.write("ohlcv_5m")
+
+Why output mode "update" (PDF: "nến 1 phút có trong Cassandra chậm dưới khoảng 10 giây"):
+in "append" mode Spark emits a window only once the watermark (max event time minus
+the watermark delay) has passed the window end. A 10:00-10:01 bar would reach Cassandra
+no earlier than when a trade stamped 10:01:30 arrives, i.e. 30-90 s after its last
+trade (the v1 job used a 2-minute watermark: 2-3 minutes). In "update" mode every
+trigger (default 5 s) emits the bars that changed, including the still-open one, and the
+sink upserts them by primary key; the final upsert happens when the watermark closes
+the window, after which late trades are dropped.
 """
 
 from __future__ import annotations
@@ -18,6 +30,8 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +64,23 @@ from streaming.sinks import (  # noqa: E402
 LOGGER = logging.getLogger("streaming.job")
 
 
+@dataclass(frozen=True)
+class BarQuery:
+    """One streaming query: a bar size, its Cassandra table and checkpoint name."""
+
+    name: str
+    window: str
+    table: str
+    #: Indicators and alerts are derived from 1-minute bars only (z-score vs 30 minutes).
+    derive_indicators: bool
+
+
+BAR_QUERIES = (
+    BarQuery("speed-ohlcv-1m", "1 minute", "ohlcv_1m", derive_indicators=True),
+    BarQuery("speed-ohlcv-5m", "5 minutes", "ohlcv_5m", derive_indicators=False),
+)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Market speed layer (role B)")
     parser.add_argument("--source", choices=["kafka", "files"], default="kafka")
@@ -60,7 +91,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--input", default="contracts/samples", help="--source files directory")
     parser.add_argument("--max-files-per-trigger", type=int, default=1)
     parser.add_argument("--checkpoint-root", default="s3a://checkpoints")
-    parser.add_argument("--trigger", default="30 seconds")
+    parser.add_argument("--trigger", default="5 seconds")
     parser.add_argument(
         "--available-now",
         action="store_true",
@@ -68,10 +99,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # PDF Kiến trúc, "Watermark": late trades beyond this delay no longer change a bar.
     parser.add_argument("--watermark", default="30 seconds")
+    parser.add_argument(
+        "--queries",
+        default=",".join(query.name for query in BAR_QUERIES),
+        help="subset of streaming queries to start",
+    )
     parser.add_argument("--output-mode", choices=["cassandra", "parquet"], default="cassandra")
     parser.add_argument("--parquet-path", default="s3a://lake/speed")
     parser.add_argument("--cassandra-host", default=os.getenv("CASSANDRA_HOSTS", "127.0.0.1"))
-    parser.add_argument("--cassandra-port", type=int, default=int(os.getenv("CASSANDRA_PORT", "9042")))
+    parser.add_argument(
+        "--cassandra-port", type=int, default=int(os.getenv("CASSANDRA_PORT", "9042"))
+    )
     parser.add_argument("--keyspace", default=os.getenv("CASSANDRA_KEYSPACE", "market"))
     parser.add_argument("--alert-topic", default="alerts")
     parser.add_argument("--disable-alert-kafka", action="store_true")
@@ -107,7 +145,10 @@ def build_spark(args: argparse.Namespace) -> SparkSession:
             .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", ""))
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", ""))
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
-            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", str(endpoint.startswith("https")).lower())
+            .config(
+                "spark.hadoop.fs.s3a.connection.ssl.enabled",
+                str(endpoint.startswith("https")).lower(),
+            )
         )
     return builder.getOrCreate()
 
@@ -135,7 +176,7 @@ def trade_stream(spark: SparkSession, args: argparse.Namespace) -> DataFrame:
 
 def _to_pandas_utc(frame: DataFrame) -> pd.DataFrame:
     pdf = frame.toPandas()
-    for column in ("window_start", "window_end", "last_event_time"):
+    for column in ("window_start", "window_end", "last_event_time", "updated_at"):
         if column in pdf.columns:
             # Arrow returns naive timestamps in the session time zone, which is UTC.
             pdf[column] = pd.to_datetime(pdf[column], utc=True)
@@ -143,7 +184,7 @@ def _to_pandas_utc(frame: DataFrame) -> pd.DataFrame:
 
 
 class SpeedLayer:
-    """``foreachBatch`` handler: writes bars, then indicators and alerts derived from them."""
+    """``foreachBatch`` handlers: upsert bars, then indicators/alerts from 1m bars."""
 
     def __init__(
         self,
@@ -155,12 +196,20 @@ class SpeedLayer:
         self.sink = sink
         self.alert_publisher = alert_publisher
 
-    def process_bars(self, batch_df: DataFrame, batch_id: int) -> None:
+    def handler(self, query: BarQuery) -> Callable[[DataFrame, int], None]:
+        def process(batch_df: DataFrame, batch_id: int) -> None:
+            self.process_bars(query, batch_df, batch_id)
+
+        return process
+
+    def process_bars(self, query: BarQuery, batch_df: DataFrame, batch_id: int) -> None:
+        # In update mode a batch holds every bar that received trades since the last
+        # trigger, partial ones included; the upsert replaces the previous version.
         bars = batch_df.withColumn("updated_at", F.current_timestamp()).select(*OHLCV_COLUMNS)
         bars.persist()
         try:
-            self.sink.write("ohlcv_1m", bars)
-            pdf = _to_pandas_utc(bars)
+            self.sink.write(query.table, bars)
+            pdf = _to_pandas_utc(bars) if query.derive_indicators else pd.DataFrame()
         finally:
             bars.unpersist()
         if pdf.empty:
@@ -175,24 +224,34 @@ class SpeedLayer:
             self.sink.write("alerts_by_day", alerts_df)
             if self.alert_publisher is not None:
                 self.alert_publisher.publish(alerts_df)
-        LOGGER.info("batch=%s bars=%s alerts=%s", batch_id, len(pdf), len(alerts))
+        LOGGER.info(
+            "query=%s batch=%s bars=%s alerts=%s", query.name, batch_id, len(pdf), len(alerts)
+        )
 
 
-def start_query(
+def start_queries(
     spark: SparkSession, args: argparse.Namespace, layer: SpeedLayer
-) -> StreamingQuery:
-    bars = aggregate_ohlcv(trade_stream(spark, args), "1 minute")
-    writer = (
-        bars.writeStream.queryName("speed-ohlcv-1m")
-        .outputMode("append")
-        .foreachBatch(layer.process_bars)
-        .option("checkpointLocation", f"{args.checkpoint_root.rstrip('/')}/speed-ohlcv-1m")
-    )
-    if args.available_now:
-        writer = writer.trigger(availableNow=True)
-    else:
-        writer = writer.trigger(processingTime=args.trigger)
-    return writer.start()
+) -> list[StreamingQuery]:
+    wanted = {name for name in args.queries.split(",") if name}
+    queries: list[StreamingQuery] = []
+    for query in BAR_QUERIES:
+        if query.name not in wanted:
+            continue
+        bars = aggregate_ohlcv(trade_stream(spark, args), query.window)
+        writer = (
+            bars.writeStream.queryName(query.name)
+            .outputMode("update")
+            .foreachBatch(layer.handler(query))
+            .option("checkpointLocation", f"{args.checkpoint_root.rstrip('/')}/{query.name}")
+        )
+        if args.available_now:
+            writer = writer.trigger(availableNow=True)
+        else:
+            writer = writer.trigger(processingTime=args.trigger)
+        queries.append(writer.start())
+    if not queries:
+        raise SystemExit(f"no known query in --queries={args.queries}")
+    return queries
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -204,7 +263,14 @@ def main(argv: list[str] | None = None) -> None:
     if not args.disable_alert_kafka and args.source == "kafka":
         publisher = KafkaAlertPublisher(args.bootstrap, args.alert_topic)
     layer = SpeedLayer(spark, build_sink(args), publisher)
-    start_query(spark, args, layer).awaitTermination()
+    queries = start_queries(spark, args, layer)
+    if args.available_now:
+        for query in queries:
+            query.awaitTermination()
+        return
+    # A failing query stops the driver; the SparkApplication restartPolicy brings it
+    # back and both queries resume from their checkpoints.
+    spark.streams.awaitAnyTermination()
 
 
 if __name__ == "__main__":
