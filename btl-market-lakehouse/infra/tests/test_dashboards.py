@@ -92,11 +92,6 @@ def test_monitoring_metrics_are_declared(client: TestClient) -> None:
         for series in (component.get("series") or [])
     }
     declared |= {CONTRACT_INFRA["metrics"]["kafka_lag"]["series"]}
-    # NOTICE:
-    # market_producer_duplicates_total was added to contracts/infra.yaml on main
-    # (commit 27159a8) after this branch last merged main.
-    # Removal condition: delete this line once main is merged into feature/D-infra.
-    declared |= {"market_producer_duplicates_total"}
     api_metrics = client.get("/metrics").text
     exprs = " ".join(target["expr"] for _, target in _targets(_dashboard("infra-health.json")))
     used = {re.sub(r"_(bucket|sum|count)$", "", name) for name in re.findall(r"\bmarket_[a-z0-9_]+", exprs)}
