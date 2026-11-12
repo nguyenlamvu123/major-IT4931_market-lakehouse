@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://btl-it4931.example/contracts/v2/bar.schema.json",
+  "title": "Bar",
+  "description": "OHLCV bar on stocks.bars (Alpaca 1-minute bars, yfinance daily backfill). Kafka key = symbol.",
+  "type": "object",
+  "required": ["bar_id", "symbol", "asset_class", "timeframe", "event_time", "open", "high", "low", "close", "volume", "source"],
+  "properties": {
+    "bar_id": {"type": "string", "pattern": "^[0-9a-f]{16}$", "description": "sha1(source|symbol|timeframe|event_time)[:16]"},
+    "symbol": {"type": "string", "pattern": "^[A-Z0-9.=_-]{2,20}$"},
+    "asset_class": {"type": "string", "enum": ["crypto", "equity", "gold", "bond", "fx"]},
+    "timeframe": {"type": "string", "enum": ["1Min", "1Day"]},
+    "event_time": {"type": "integer", "minimum": 0, "description": "Bar start, epoch milliseconds UTC"},
+    "open": {"type": "number", "exclusiveMinimum": 0},
+    "high": {"type": "number", "exclusiveMinimum": 0},
+    "low": {"type": "number", "exclusiveMinimum": 0},
+    "close": {"type": "number", "exclusiveMinimum": 0},
+    "volume": {"type": "number", "minimum": 0},
+    "vwap": {"type": ["number", "null"]},
+    "trade_count": {"type": ["integer", "null"], "minimum": 0},
+    "source": {"type": "string", "enum": ["alpaca", "yahoo", "replay", "demo"]},
+    "ingest_time": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": true
+}

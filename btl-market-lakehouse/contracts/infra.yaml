@@ -1,0 +1,47 @@
+# Infrastructure contract (D -> everyone): namespaces, service names, secrets, images, metrics.
+version: 2
+namespaces:
+  kafka: {components: [strimzi-operator, kafka/market, kafkaconnect/market-connect, kafka-exporter]}
+  minio: {components: [minio]}
+  cassandra: {components: [k8ssandra-operator, k8ssandracluster/market (dc1)]}
+  spark: {components: [spark-operator, sparkapplications of B and C], service_account: spark-operator-spark}
+  airflow: {components: [airflow (official Helm chart, KubernetesExecutor)]}
+  monitoring: {components: [kube-prometheus-stack (Prometheus, Grafana, node-exporter, kube-state-metrics)]}
+  market: {components: [producers (A), market-api (D)]}
+
+services:
+  kafka_bootstrap: market-kafka-bootstrap.kafka.svc:9092
+  kafka_connect_rest: market-connect-connect-api.kafka.svc:8083
+  minio: http://minio.minio.svc:9000
+  cassandra: market-dc1-service.cassandra.svc:9042
+  airflow_web: airflow-webserver.airflow.svc:8080
+  market_api: market-api.market.svc:8000
+  grafana: kube-prometheus-stack-grafana.monitoring.svc:80
+
+secrets:
+  market-api-keys: [ALPACA_API_KEY, ALPACA_SECRET_KEY, FINNHUB_API_KEY, FRED_API_KEY]  # `make secrets` from .env, never committed
+  minio-credentials: [MINIO_ACCESS_KEY, MINIO_SECRET_KEY]                              # copied into every namespace that needs it
+
+env:
+  [KAFKA_BOOTSTRAP, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, CASSANDRA_HOSTS, CASSANDRA_PORT,
+   CASSANDRA_KEYSPACE, CASSANDRA_USERNAME, CASSANDRA_PASSWORD]
+
+images:
+  # Built for linux/arm64 (MacBook M1 Max hosts minikube) and loaded with `minikube image load`.
+  # Tag "dev" (not "latest") so Kubernetes defaults to imagePullPolicy IfNotPresent.
+  - btl/ingest:dev
+  - btl/streaming:dev
+  - btl/batch:dev
+  - btl/airflow:dev
+  - btl/market-api:dev
+  - btl/kafka-connect-s3:dev
+
+metrics:
+  producers: {port: 8001, path: /metrics, series: [market_producer_messages_total, market_producer_errors_total, market_producer_reconnects_total, market_producer_dead_letter_total]}
+  streaming_driver: {port: 9108, path: /metrics, series: [market_speed_input_rows_per_second, market_speed_processed_rows_per_second, market_speed_batch_duration_ms, market_speed_offsets_behind_latest, market_speed_event_to_sink_latency_seconds]}
+  kafka_lag: {exporter: strimzi kafka-exporter, series: kafka_consumergroup_lag}
+  market_api: {port: 8000, path: /metrics}
+
+batch_schedule:
+  cron: "0 1 * * *"          # 01:00 UTC = 08:00 Vietnam, after the US close (04:00 Vietnam)
+  processes: "dt = {{ ds }}"  # previous UTC day
