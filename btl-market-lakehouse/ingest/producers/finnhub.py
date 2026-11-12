@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from common.contracts import INSTRUMENTS, make_trade
@@ -28,6 +29,7 @@ WS_URL = "wss://ws.finnhub.io"
 def parse_finnhub_message(
     payload: dict[str, Any],
     ingest_time: int | None = None,
+    on_reject: Callable[[Any, str], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Finnhub websocket message -> contract trades (empty for ping/other types).
 
@@ -55,8 +57,9 @@ def parse_finnhub_message(
                     metadata={"conditions": item.get("c")},
                 )
             )
-        except (KeyError, TypeError, ValueError):
-            continue
+        except (KeyError, TypeError, ValueError) as exc:
+            if on_reject is not None:
+                on_reject(item, f"finnhub trade: {exc!r}")
     return records
 
 
@@ -78,10 +81,16 @@ class FinnhubProducer(BaseProducer):
         self.ws_url = ws_url
 
     def handle_message(self, raw: str | bytes) -> int:
-        records = parse_finnhub_message(json.loads(raw))
-        for record in records:
-            self.publish(record)
-        return len(records)
+        try:
+            payload = json.loads(raw)
+        except ValueError as exc:
+            self.dead_letter(str(raw), f"bad json: {exc}", "stocks.trades")
+            return 0
+        records = parse_finnhub_message(
+            payload,
+            on_reject=lambda item, error: self.dead_letter(item, error, "stocks.trades"),
+        )
+        return sum(1 for record in records if self.publish(record))
 
     async def consume(self, stop_event: threading.Event) -> None:
         import websockets
@@ -98,4 +107,4 @@ class FinnhubProducer(BaseProducer):
                 self.handle_message(raw)
 
     def run(self, stop_event: threading.Event) -> None:
-        asyncio.run(self.consume(stop_event))
+        self.run_with_reconnect(self.consume, stop_event)

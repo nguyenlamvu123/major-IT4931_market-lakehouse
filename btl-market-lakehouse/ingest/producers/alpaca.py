@@ -29,7 +29,7 @@ from typing import Any
 
 from common.contracts import INSTRUMENTS, make_bar, make_trade
 
-from ..base import BaseProducer, KafkaSink, iso_to_ms, now_ms
+from ..base import BaseProducer, KafkaSink, MalformedPayload, iso_to_ms, now_ms
 from ..config import ApiSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -70,8 +70,8 @@ def parse_alpaca_trade(
             ingest_time=ingest_time if ingest_time is not None else now_ms(),
             metadata={"exchange": payload.get("x"), "tape": payload.get("z")},
         )
-    except (KeyError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MalformedPayload(f"alpaca trade: {exc!r}") from exc
 
 
 def parse_alpaca_bar(
@@ -96,19 +96,27 @@ def parse_alpaca_bar(
             trade_count=int(payload["n"]) if payload.get("n") is not None else None,
             ingest_time=ingest_time if ingest_time is not None else now_ms(),
         )
-    except (KeyError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MalformedPayload(f"alpaca bar: {exc!r}") from exc
 
 
 class AlpacaStreamError(RuntimeError):
     """Alpaca sent ``T=error`` (bad credentials, connection limit, invalid syntax)."""
 
 
-def parse_alpaca_ws_message(raw: str | bytes, ingest_time: int | None = None) -> list[dict]:
+Reject = Callable[[Any, str], None]
+
+
+def parse_alpaca_ws_message(
+    raw: str | bytes,
+    ingest_time: int | None = None,
+    on_reject: Reject | None = None,
+) -> list[dict]:
     """One websocket frame (a JSON array) -> contract records.
 
     Control messages (``success``, ``subscription``) are skipped; ``error`` raises so the
-    reconnect loop backs off instead of spinning on a rejected session.
+    reconnect loop backs off instead of spinning on a rejected session. Malformed trade
+    or bar items are handed to ``on_reject`` (the producer's dead-letter).
     """
     ingest_time = ingest_time if ingest_time is not None else now_ms()
     messages = json.loads(raw)
@@ -117,16 +125,18 @@ def parse_alpaca_ws_message(raw: str | bytes, ingest_time: int | None = None) ->
     records: list[dict[str, Any]] = []
     for message in messages:
         kind = message.get("T")
-        if kind == "t":
-            record = parse_alpaca_trade(message, ingest_time=ingest_time)
-        elif kind == "b":
-            record = parse_alpaca_bar(message, ingest_time=ingest_time)
-        elif kind == "error":
+        if kind == "error":
             raise AlpacaStreamError(f"{message.get('code')}: {message.get('msg')}")
-        else:
+        if kind not in {"t", "b"}:
             continue
-        if record is not None:
-            records.append(record)
+        try:
+            if kind == "t":
+                records.append(parse_alpaca_trade(message, ingest_time=ingest_time))
+            else:
+                records.append(parse_alpaca_bar(message, ingest_time=ingest_time))
+        except MalformedPayload as exc:
+            if on_reject is not None:
+                on_reject(message, str(exc))
     return records
 
 
@@ -154,6 +164,7 @@ class AlpacaRestPoller:
         lookback_seconds: int = 60,
         page_limit: int = 1000,
         clock_ms: Callable[[], int] = now_ms,
+        on_reject: Reject | None = None,
     ) -> None:
         if http_get is None:
             import requests
@@ -163,6 +174,7 @@ class AlpacaRestPoller:
         self.http_get = http_get
         self.page_limit = page_limit
         self.clock_ms = clock_ms
+        self.on_reject = on_reject
         self.lookback_ms = lookback_seconds * 1000
         #: symbol -> RFC 3339 timestamp of the newest trade already published.
         self.cursor: dict[str, str] = {}
@@ -199,8 +211,13 @@ class AlpacaRestPoller:
             response.raise_for_status()
             body = response.json()
             for item in body.get("trades") or []:
-                record = parse_alpaca_trade(item, symbol)
-                if record is None or record["trade_id"] in boundary:
+                try:
+                    record = parse_alpaca_trade(item, symbol)
+                except MalformedPayload as exc:
+                    if self.on_reject is not None:
+                        self.on_reject(item, str(exc))
+                    continue
+                if record["trade_id"] in boundary:
                     continue
                 output.append(record)
                 newest_raw = str(item["t"])
@@ -240,13 +257,19 @@ class AlpacaProducer(BaseProducer):
         self.mode = mode
         self.interval = interval
         self.ws_url = ws_url
-        self.poller = AlpacaRestPoller(settings) if mode == "rest" else None
+        self.poller = (
+            AlpacaRestPoller(settings, on_reject=self._reject) if mode == "rest" else None
+        )
+
+    def _reject(self, payload: Any, error: str) -> None:
+        topic = "stocks.bars" if isinstance(payload, dict) and payload.get("T") == "b" else (
+            "stocks.trades"
+        )
+        self.dead_letter(payload, error, topic)
 
     def handle_message(self, raw: str | bytes) -> int:
-        records = parse_alpaca_ws_message(raw)
-        for record in records:
-            self.publish(record)
-        return len(records)
+        records = parse_alpaca_ws_message(raw, on_reject=self._reject)
+        return sum(1 for record in records if self.publish(record))
 
     async def consume(self, stop_event: threading.Event) -> None:
         import websockets
@@ -276,14 +299,11 @@ class AlpacaProducer(BaseProducer):
         sent = 0
         for symbol in self.symbols:
             for record in self.poller.fetch_new_trades(symbol):
-                self.publish(record)
-                sent += 1
+                sent += 1 if self.publish(record) else 0
         return sent
 
     def run(self, stop_event: threading.Event) -> None:
         if self.mode == "ws":
-            asyncio.run(self.consume(stop_event))
-            return
-        while not stop_event.is_set():
-            self.poll_once()
-            stop_event.wait(self.interval)
+            self.run_with_reconnect(self.consume, stop_event)
+        else:
+            self.poll_forever(self.poll_once, self.interval, stop_event)

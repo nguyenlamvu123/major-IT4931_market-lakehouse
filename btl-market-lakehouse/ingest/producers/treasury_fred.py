@@ -8,6 +8,7 @@ question. Each record is keyed by tenor.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
@@ -23,6 +24,7 @@ def parse_fred_observations(
     payload: dict[str, Any],
     series_id: str,
     ingest_time: int | None = None,
+    on_reject: Callable[[Any, str], None] | None = None,
 ) -> list[dict[str, Any]]:
     """FRED observations -> contract rate records; ``"."`` (holiday/no data) is skipped."""
     ingest_time = ingest_time if ingest_time is not None else now_ms()
@@ -34,8 +36,9 @@ def parse_fred_observations(
         try:
             output.append(make_rate(series_id, item["date"], float(value), "fred",
                                     ingest_time=ingest_time))
-        except (KeyError, TypeError, ValueError):
-            continue
+        except (KeyError, TypeError, ValueError) as exc:
+            if on_reject is not None:
+                on_reject({"series_id": series_id, **item}, f"fred observation: {exc!r}")
     return output
 
 
@@ -59,18 +62,19 @@ class RatesPublisher(BaseProducer):
         for record in sorted(records, key=lambda item: item["day"]):
             if record["day"] <= self.last_day.get(record["series_id"], ""):
                 continue
-            self.publish(record)
+            if self.publish(record):
+                sent += 1
             self.last_day[record["series_id"]] = record["day"]
-            sent += 1
         return sent
+
+    def reject(self, payload: Any, error: str) -> None:
+        self.dead_letter(payload, error, "rates.yields")
 
     def poll_once(self) -> int:
         raise NotImplementedError
 
     def run(self, stop_event: threading.Event) -> None:
-        while not stop_event.is_set():
-            self.poll_once()
-            stop_event.wait(self.interval)
+        self.poll_forever(self.poll_once, self.interval, stop_event)
 
 
 class FredYieldProducer(RatesPublisher):
@@ -109,5 +113,7 @@ class FredYieldProducer(RatesPublisher):
                 timeout=10,
             )
             response.raise_for_status()
-            records.extend(parse_fred_observations(response.json(), series_id))
+            records.extend(
+                parse_fred_observations(response.json(), series_id, on_reject=self.reject)
+            )
         return self.publish_new(records)
