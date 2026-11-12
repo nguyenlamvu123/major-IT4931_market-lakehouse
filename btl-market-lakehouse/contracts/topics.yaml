@@ -1,0 +1,74 @@
+# Kafka topics, contract v2 (PDF "Kiến trúc – Phân công", mục "Hợp đồng giữa các vai").
+# Mirrored in common/contracts.py TOPICS; tests/test_contracts.py keeps both in sync.
+version: 2
+cluster:
+  name: market                     # Strimzi Kafka CR
+  namespace: kafka
+  bootstrap_k8s: market-kafka-bootstrap.kafka.svc:9092
+  bootstrap_dev: localhost:9092    # docker-compose.dev.yml, host side
+
+defaults:
+  replication_dev: 1
+  replication_demo: 3              # with min.insync.replicas=2 (idea PDF, slide "Hạ tầng")
+  cleanup_policy: delete
+
+topics:
+  - name: crypto.trades
+    partitions: 3
+    retention_ms: 604800000        # 7 days
+    key: symbol
+    schema: schemas/trade.schema.json
+    producer: A
+    sources: [binance]
+    symbols: [BTCUSDT, ETHUSDT]
+  - name: stocks.trades
+    partitions: 3
+    retention_ms: 604800000
+    key: symbol
+    schema: schemas/trade.schema.json
+    producer: A
+    sources: [alpaca, finnhub]
+    symbols: [AAPL, MSFT, NVDA, SPY, GLD, TLT, IEF, SHY]
+  - name: stocks.bars
+    partitions: 3
+    retention_ms: 2592000000       # 30 days
+    key: symbol
+    schema: schemas/bar.schema.json
+    producer: A
+    sources: [alpaca, yahoo]
+    symbols: [AAPL, MSFT, NVDA, SPY, GLD, TLT, IEF, SHY]
+  - name: gold.quotes
+    partitions: 1
+    retention_ms: 604800000
+    key: symbol
+    schema: schemas/trade.schema.json
+    producer: A
+    sources: [yahoo]
+    symbols: ["GC=F"]
+  - name: fx.dxy
+    partitions: 1
+    retention_ms: 604800000
+    key: symbol
+    schema: schemas/trade.schema.json
+    producer: A
+    sources: [yahoo]               # Yahoo ticker DX-Y.NYB, published as symbol DXY
+    symbols: [DXY]
+  - name: rates.yields
+    partitions: 1
+    retention_ms: 2592000000
+    key: tenor
+    schema: schemas/rate_yield.schema.json
+    producer: A
+    sources: [fred, treasury]
+  - name: alerts
+    partitions: 3
+    retention_ms: 259200000        # 3 days
+    key: symbol
+    schema: schemas/alert.schema.json
+    producer: B
+  - name: dead-letter
+    partitions: 1
+    retention_ms: 604800000
+    key: source
+    schema: null                   # original payload + error, see README
+    producer: A                    # producers and the Kafka Connect S3 sink

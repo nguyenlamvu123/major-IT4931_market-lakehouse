@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://btl-it4931.example/contracts/v2/rate_yield.schema.json",
+  "title": "RateYield",
+  "description": "Daily US Treasury yield on rates.yields. Kafka key = tenor.",
+  "type": "object",
+  "required": ["series_id", "tenor", "day", "event_time", "yield", "source"],
+  "properties": {
+    "series_id": {"type": "string", "enum": ["DGS1MO", "DGS3MO", "DGS6MO", "DGS1", "DGS2", "DGS5", "DGS10", "DGS30", "DFII10"]},
+    "tenor": {"type": "string", "enum": ["1M", "3M", "6M", "1Y", "2Y", "5Y", "10Y", "30Y", "REAL10Y"]},
+    "day": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "event_time": {"type": "integer", "minimum": 0, "description": "00:00 UTC of day, epoch milliseconds"},
+    "yield": {"type": "number", "description": "Percent, e.g. 4.15"},
+    "source": {"type": "string", "enum": ["fred", "treasury", "replay", "demo"]},
+    "ingest_time": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": true
+}
