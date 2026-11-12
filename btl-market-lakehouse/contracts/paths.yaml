@@ -1,0 +1,31 @@
+# MinIO / S3 layout, contract v2. MinIO replaces HDFS (PDF, "Từ điển các module").
+version: 2
+endpoint_k8s: http://minio.minio.svc:9000
+endpoint_dev: http://localhost:9000      # inside docker compose: http://minio:9000
+buckets: [lake, checkpoints]
+
+bronze:
+  # Written by Kafka Connect S3 sink (A). JSON lines, partitioned by the record's
+  # event_time in UTC: s3a://lake/bronze/<topic>/dt=YYYY-MM-DD/<topic>+<partition>+<offset>.json
+  pattern: s3a://lake/bronze/{topic}/dt={YYYY-MM-DD}/
+  topics: [crypto.trades, stocks.trades, stocks.bars, gold.quotes, fx.dxy, rates.yields, alerts]
+
+silver:
+  # Written by C (bronze_to_silver). Parquet, cleaned, de-duplicated, UTC.
+  trades: s3a://lake/silver/trades/dt={YYYY-MM-DD}/   # crypto.trades + stocks.trades + gold.quotes + fx.dxy, with column "topic"
+  bars: s3a://lake/silver/bars/dt={YYYY-MM-DD}/       # stocks.bars
+  yields: s3a://lake/silver/yields/dt={YYYY-MM-DD}/   # rates.yields
+  alerts: s3a://lake/silver/alerts/dt={YYYY-MM-DD}/   # alerts (for the "where does money go on crash days" study)
+
+gold:
+  # Written by C (silver_to_gold, train_kmeans). Parquet, dt = processing day.
+  daily_summary: s3a://lake/gold/daily_summary/dt={YYYY-MM-DD}/
+  correlation_matrix: s3a://lake/gold/correlation_matrix/dt={YYYY-MM-DD}/
+  yield_curve: s3a://lake/gold/yield_curve/dt={YYYY-MM-DD}/
+  ml_features: s3a://lake/gold/ml_features/dt={YYYY-MM-DD}/
+  asset_clusters: s3a://lake/gold/asset_clusters/dt={YYYY-MM-DD}/
+
+checkpoints:
+  # Spark Structured Streaming state (B). One directory per streaming query.
+  pattern: s3a://checkpoints/{job}/
+  jobs: [speed-ohlcv-1m, speed-ohlcv-5m]

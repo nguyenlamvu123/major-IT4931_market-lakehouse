@@ -15,8 +15,15 @@ def ema(series: pd.Series, span: int) -> pd.Series:
 
 
 def rolling_zscore(series: pd.Series, window: int = 30, min_periods: int = 5) -> pd.Series:
-    mean = series.rolling(window, min_periods=min_periods).mean()
-    std = series.rolling(window, min_periods=min_periods).std()
+    """Distance of each value from the *previous* ``window`` values, in std units.
+
+    The baseline is shifted by one row so a spike does not inflate its own mean/std.
+    This matches the alert rule in the PDF: "giá lệch hơn 3 độ lệch chuẩn so với
+    30 phút trước".
+    """
+    baseline = series.shift(1)
+    mean = baseline.rolling(window, min_periods=min_periods).mean()
+    std = baseline.rolling(window, min_periods=min_periods).std()
     return (series - mean) / std.replace(0, np.nan)
 
 

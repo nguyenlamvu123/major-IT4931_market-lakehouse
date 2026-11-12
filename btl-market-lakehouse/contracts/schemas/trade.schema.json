@@ -1,61 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://btl-it4931.example/contracts/trade.schema.json",
+  "$id": "https://btl-it4931.example/contracts/v2/trade.schema.json",
   "title": "Trade",
+  "description": "Price event on crypto.trades, stocks.trades, gold.quotes and fx.dxy. Kafka key = symbol.",
   "type": "object",
-  "required": [
-    "trade_id",
-    "symbol",
-    "asset_class",
-    "event_time",
-    "price",
-    "volume",
-    "source"
-  ],
+  "required": ["trade_id", "symbol", "asset_class", "event_time", "price", "volume", "source"],
   "properties": {
     "trade_id": {
       "type": "string",
-      "minLength": 8,
-      "maxLength": 64
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "sha1(source|symbol|exchange_trade_id)[:16] when the exchange gives an id, else sha1(source|symbol|event_time|price|volume)[:16]"
     },
-    "symbol": {
-      "type": "string",
-      "pattern": "^[A-Z0-9._-]{2,20}$"
-    },
-    "asset_class": {
-      "type": "string",
-      "enum": ["crypto", "equity", "commodity", "fx", "rates"]
-    },
-    "event_time": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Epoch milliseconds, UTC"
-    },
-    "ingest_time": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Epoch milliseconds, UTC"
-    },
-    "price": {
-      "type": "number",
-      "exclusiveMinimum": 0
-    },
-    "volume": {
-      "type": "number",
-      "minimum": 0
-    },
-    "source": {
-      "type": "string",
-      "minLength": 1
-    },
-    "currency": {
-      "type": "string",
-      "default": "USD"
-    },
-    "metadata": {
-      "type": "object",
-      "additionalProperties": true
-    }
+    "symbol": {"type": "string", "pattern": "^[A-Z0-9.=_-]{2,20}$"},
+    "asset_class": {"type": "string", "enum": ["crypto", "equity", "gold", "bond", "fx"]},
+    "event_time": {"type": "integer", "minimum": 0, "description": "Epoch milliseconds UTC when the trade/quote happened"},
+    "ingest_time": {"type": "integer", "minimum": 0, "description": "Epoch milliseconds UTC when the producer received it"},
+    "price": {"type": "number", "exclusiveMinimum": 0},
+    "volume": {"type": "number", "minimum": 0, "description": "0 for feeds without volume (Yahoo DX-Y.NYB)"},
+    "source": {"type": "string", "enum": ["binance", "alpaca", "finnhub", "yahoo", "replay", "demo"]},
+    "exchange_trade_id": {"type": "string"},
+    "currency": {"type": "string", "default": "USD"},
+    "metadata": {"type": "object", "additionalProperties": true}
   },
   "additionalProperties": true
 }
