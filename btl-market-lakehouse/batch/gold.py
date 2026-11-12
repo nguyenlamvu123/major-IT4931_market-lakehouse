@@ -406,21 +406,30 @@ def build_gold(
     lookback_days: int = 150,
     window_days: int = 90,
     reference_symbol: str = "SPY",
+    cache: bool = True,
 ) -> dict[str, DataFrame]:
     """Compute all gold tables for the processing days ``days``.
 
     Silver is read from ``days[0] - lookback_days`` so returns, 20-day volatility and
     the 90-row correlation window have history (90 US trading days ~ 130 calendar days).
+
+    ``cache`` keeps ``daily``, the aligned changes and the correlations in memory: each
+    feeds several gold tables, and without it Spark recomputes the trade aggregation
+    for every table written (jobs/benchmark.py measures the difference).
     """
+
+    def reuse(frame: DataFrame) -> DataFrame:
+        return frame.cache() if cache else frame
+
     first, last = days[0], days[-1]
     history_start = first - timedelta(days=lookback_days)
     trades = read_silver(spark, lake, "trades", history_start, last)
     bars = read_silver(spark, lake, "bars", history_start, last)
     yields = read_silver(spark, lake, "yields", history_start, last)
 
-    daily = build_daily(trades, bars).cache()
-    changes = aligned_changes(daily, yields, reference_symbol=reference_symbol).cache()
-    correlations = correlation_as_of(changes, days, window_days=window_days).cache()
+    daily = reuse(build_daily(trades, bars))
+    changes = reuse(aligned_changes(daily, yields, reference_symbol=reference_symbol))
+    correlations = reuse(correlation_as_of(changes, days, window_days=window_days))
 
     return {
         "daily_summary": daily.filter(F.col("day").isin(days)).withColumn("dt", F.col("day")),
