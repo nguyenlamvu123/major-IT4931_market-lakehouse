@@ -1,3 +1,5 @@
+# Docker Compose provisioning. On Kubernetes the same two datasources (same uids, which the
+# dashboards reference) come from helm/kube-prometheus-stack-values.yaml.
 apiVersion: 1
 
 datasources:
@@ -8,8 +10,12 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
 
+  # Dashboards use relative URLs (/api/v1/...); Infinity prefixes this base URL.
   - name: Market API
     uid: infinity
     type: yesoreyeram-infinity-datasource
     access: proxy
     url: http://market-api:8000
+    jsonData:
+      allowedHosts:
+        - http://market-api:8000
