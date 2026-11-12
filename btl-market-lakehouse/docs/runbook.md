@@ -1,88 +1,88 @@
 # Runbook
 
-## 1. Local demo (no Docker)
+## 1. Demo local (không cần Docker)
 
 ```bash
 cd btl-market-lakehouse
 python3 -m venv .venv && . .venv/bin/activate
-pip install pandas pyarrow numpy pytest PyYAML
-make samples
-make demo
-make test
-make verify
+pip install -r requirements.txt
+make samples demo verify test
+make api        # http://localhost:8000/health -> "source": "demo"
 ```
 
-Expected demo output: `data/demo/trades.jsonl`, `bars.jsonl`, `alerts.json`,
-`daily_summary.csv`, `correlation_matrix.csv`, `yield_curve.csv`, `ml_features.csv`,
-`summary.json`.
-
-## 2. API only
-
-```bash
-pip install -r serving/requirements.txt
-make api
-curl localhost:8000/health
-```
-
-`/health` reports `"source": "demo"` when Cassandra is unavailable. This is expected
-on the current machine.
-
-## 3. Dev Compose
+## 2. Compose dev: Kafka + MinIO + Cassandra (laptop của A/B/C)
 
 ```bash
 cp .env.example .env
-make dev-up
-make topics
-make cassandra-init
+make dev-up       # bucket lake/checkpoints và schema contracts/cassandra.cql được tạo tự động
+make topics       # topic từ contracts/topics.yaml (cần python3 + PyYAML trên máy)
 docker compose -f infra/docker-compose.dev.yml ps
 ```
 
-Wait 60-90 seconds for Cassandra. If Kafka restarts, check the KRaft volume:
-`docker compose -f infra/docker-compose.dev.yml down -v` then start again.
-
-## 4. Full stack
-
-```bash
-docker build -f serving/Dockerfile -t btl/market-api .
-docker compose -f infra/docker-compose.full.yml up -d
-```
-
-Ports: Grafana 3000, Prometheus 9090, Airflow 8081, API 8000, Spark UI 8080.
-Full stack is not runnable on the current 3.6 GB free disk; use `config -q` only.
-
-## 5. Kubernetes
-
-```bash
-kubectl apply -k infra/k8s
-kubectl -n market get pods,svc
-kubectl -n market port-forward svc/market-api 8000:8000
-```
-
-Build images first (`btl/market-api`, `btl/airflow`) and push to a registry reachable
-by the cluster.
-
-## 6. Health checks
-
-| Check | Command | Expected |
+| Dịch vụ | Từ laptop | Từ container khác |
 |---|---|---|
-| API | `curl -fsS localhost:8000/health` | `status: ok` |
-| Metrics | `curl -fsS localhost:8000/metrics` | Prometheus text |
-| Kafka topics | `kafka-topics.sh --bootstrap-server localhost:9092 --list` | market.* |
-| Cassandra | `cqlsh localhost 9042 -e "describe keyspaces"` | market |
-| Grafana | `curl -fsS localhost:3000/api/health` | database ok |
-| Prometheus | `curl -fsS localhost:9090/-/ready` | Ready |
+| Kafka | `localhost:9092` | `kafka:29092` |
+| MinIO | `http://localhost:9000` (console 9001, minioadmin/minioadmin) | `http://minio:9000` |
+| Cassandra | `localhost:9042` | `cassandra:9042` |
 
-## 7. Fault scenarios
+`make dev-down` xoá cả volume. Kafka dev không giữ dữ liệu giữa các lần chạy, nên phải
+chạy lại `make topics`.
 
-See `infra/fault_injection/README.md`. After each test, restart the affected service
-and verify the API `/health` and Grafana panels recover.
-
-## 8. Rebuild a role branch
+## 3. Kubernetes (cụm chính)
 
 ```bash
-git checkout feature/D-infra
-git merge --no-ff feature/D-ci
-make test
+cp .env.example .env    # điền API key, MINIO_ACCESS_KEY/MINIO_SECRET_KEY
+make up                 # khoảng 15–25 phút lần đầu (kéo image, chart)
+make port-forward       # Grafana :3000, API :8000, Airflow :8080, Prometheus :9090, MinIO :9001
+REQUIRE_REAL_DATA=1 bash scripts/smoke_test.sh
 ```
 
-Do not merge role branches into `main`; use an `integration` branch if needed.
+Trên một checkout tích hợp (đã có `ingest/`, `streaming/`, `batch/` của các vai),
+`make up` cũng build image và apply `ingest/k8s`, `streaming/k8s`. Trên nhánh riêng của
+D, bước đó bị bỏ qua và có cảnh báo.
+
+Các lệnh lẻ:
+
+| Lệnh | Làm gì |
+|---|---|
+| `make images` | Build 6 image `btl/*:dev` cho linux/arm64 rồi `minikube image load` |
+| `make secrets` | Tạo Secret từ `.env` |
+| `make apply` | Apply lại manifest nền (kustomize) |
+| `make apps` | Apply lại workload của A/B |
+| `make status` | Pod và CR theo namespace |
+| `make down` | Xoá minikube (`SOFT=1`: chỉ gỡ release và namespace) |
+
+## 4. Kiểm tra sức khoẻ
+
+| Kiểm tra | Lệnh | Kỳ vọng |
+|---|---|---|
+| API | `curl -i localhost:8000/health` | `"status": "ok"`; header `X-Data-Source: cassandra` trên cụm |
+| Kafka | `kubectl -n kafka get kafka market` | `READY True` |
+| Topic | `kubectl -n kafka get kafkatopics` | 8 topic, đều Ready |
+| Cassandra | `kubectl -n cassandra get pods` và job `cassandra-schema` Complete | Bảng của `contracts/cassandra.cql` đã tạo |
+| MinIO | job `minio-buckets` Complete | Có bucket `lake`, `checkpoints` |
+| Spark | `kubectl -n spark get sparkapplications` | Speed layer `RUNNING` |
+| Airflow | http://localhost:8080 (admin/admin) | DAG của C hiện, không có lỗi import |
+| Grafana | http://localhost:3000 (admin/admin), thư mục "Market Lakehouse" | Ô "Nguồn dữ liệu" = cassandra |
+
+## 5. Sự cố thường gặp
+
+| Hiện tượng | Nguyên nhân | Xử lý |
+|---|---|---|
+| Pod `btl/*` ở trạng thái `ErrImageNeverPull` / `ImagePullBackOff` | Chưa nạp image vào minikube | `make images`, rồi xoá pod |
+| `kustomize build` báo `security; file ... is not in or below` | Thiếu `--load-restrictor LoadRestrictionsNone` | Dùng `make apply` / `make up`, không dùng `kubectl apply -k` |
+| Producer báo `UNKNOWN_TOPIC_OR_PART` | Đã tắt auto-create topic; topic chưa tạo hoặc sai tên | `make topics` (compose) hoặc `kubectl -n kafka get kafkatopics`; kiểm tra tên theo `contracts/topics.yaml` |
+| Dashboard: Nguồn dữ liệu = none, panel lỗi 503 | Cassandra mất kết nối (K8s không dùng dữ liệu demo) | `kubectl -n cassandra get pods`; API tự kết nối lại sau tối đa 5 giây |
+| Dashboard: Nguồn dữ liệu = demo trên cụm | Manifest bị sửa `DEMO_FALLBACK` | Đặt lại `false` trong `infra/k8s/market/market-api.yaml` |
+| Operator khởi động lại liên tục sau khi máy ngủ | Mất leader lease (đã gặp, slide "Sự cố về hệ thống") | Giữ máy thức (`caffeinate -dims`); operator tự hồi phục |
+| Panel Kafka lag trống | Chưa có connector, hoặc kafka-exporter chưa được scrape | `kubectl -n kafka get pods -l strimzi.io/name=market-kafka-exporter`; xem target trên Prometheus |
+| Panel Spark/producer trống | Pod thiếu label `btl.market/metrics=true` hoặc port tên `metrics` | Sửa manifest của vai A/B theo `infra/k8s/README.md` |
+| Cassandra lâu Ready | Lần đầu cần vài phút | `make status`; job schema tự chờ |
+
+## 6. Thử lỗi
+
+Xem `infra/fault_injection/README.md`. Kết quả ghi vào `docs/lessons/D-fault-injection.md`.
+
+## 7. Demo
+
+Xem `docs/demo_script.md`.
