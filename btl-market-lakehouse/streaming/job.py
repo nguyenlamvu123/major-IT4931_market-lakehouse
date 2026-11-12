@@ -8,7 +8,7 @@ checkpoint under ``s3a://checkpoints/<query>/``:
       -> start_queries
            -> trade_stream (read_kafka | read_files -> clean_trades -> dedupe_trades)
            -> aggregate_ohlcv("1 minute")  -> foreachBatch(SpeedLayer.handler(1m))
-                -> Sink.write("ohlcv_1m") -> enrich_batch
+                -> Sink.write("ohlcv_1m") -> IndicatorState.update (bars kept across batches)
                 -> Sink.write("indicators_latest" / "alerts_by_day")
                 -> KafkaAlertPublisher.publish (topic "alerts")
            -> aggregate_ohlcv("5 minutes") -> foreachBatch(SpeedLayer.handler(5m))
@@ -43,7 +43,6 @@ from pyspark.sql import functions as F  # noqa: E402
 from pyspark.sql.streaming import StreamingQuery  # noqa: E402
 
 from common.contracts import TRADE_TOPICS  # noqa: E402
-from streaming.batch_logic import enrich_batch  # noqa: E402
 from streaming.columns import OHLCV_COLUMNS  # noqa: E402
 from streaming.ohlcv import (  # noqa: E402
     aggregate_ohlcv,
@@ -54,12 +53,14 @@ from streaming.ohlcv import (  # noqa: E402
 )
 from streaming.schemas import ALERT_SCHEMA, INDICATOR_SCHEMA  # noqa: E402
 from streaming.sinks import (  # noqa: E402
+    CassandraBarLoader,
     CassandraSettings,
     CassandraSink,
     KafkaAlertPublisher,
     ParquetSink,
     Sink,
 )
+from streaming.state import IndicatorState  # noqa: E402
 
 LOGGER = logging.getLogger("streaming.job")
 
@@ -191,10 +192,12 @@ class SpeedLayer:
         spark: SparkSession,
         sink: Sink,
         alert_publisher: KafkaAlertPublisher | None = None,
+        state: IndicatorState | None = None,
     ) -> None:
         self.spark = spark
         self.sink = sink
         self.alert_publisher = alert_publisher
+        self.state = state or IndicatorState()
 
     def handler(self, query: BarQuery) -> Callable[[DataFrame, int], None]:
         def process(batch_df: DataFrame, batch_id: int) -> None:
@@ -214,18 +217,29 @@ class SpeedLayer:
             bars.unpersist()
         if pdf.empty:
             return
-        indicators, alerts = enrich_batch(pdf, pd.Timestamp.now(tz="UTC"))
-        if not indicators.empty:
+        update = self.state.update(pdf, pd.Timestamp.now(tz="UTC"))
+        if not update.indicators.empty:
             self.sink.write(
-                "indicators_latest", self.spark.createDataFrame(indicators, INDICATOR_SCHEMA)
+                "indicators_latest",
+                self.spark.createDataFrame(update.indicators, INDICATOR_SCHEMA),
             )
-        if not alerts.empty:
-            alerts_df = self.spark.createDataFrame(alerts, ALERT_SCHEMA)
-            self.sink.write("alerts_by_day", alerts_df)
-            if self.alert_publisher is not None:
-                self.alert_publisher.publish(alerts_df)
+        if not update.alerts.empty:
+            # Cassandra gets every alert of the batch (upsert by alert_id is harmless);
+            # Kafka only the ones this driver has not published yet.
+            self.sink.write(
+                "alerts_by_day", self.spark.createDataFrame(update.alerts, ALERT_SCHEMA)
+            )
+        if not update.new_alerts.empty and self.alert_publisher is not None:
+            self.alert_publisher.publish(
+                self.spark.createDataFrame(update.new_alerts, ALERT_SCHEMA)
+            )
         LOGGER.info(
-            "query=%s batch=%s bars=%s alerts=%s", query.name, batch_id, len(pdf), len(alerts)
+            "query=%s batch=%s bars=%s alerts=%s new_alerts=%s",
+            query.name,
+            batch_id,
+            len(pdf),
+            len(update.alerts),
+            len(update.new_alerts),
         )
 
 
@@ -262,7 +276,9 @@ def main(argv: list[str] | None = None) -> None:
     publisher = None
     if not args.disable_alert_kafka and args.source == "kafka":
         publisher = KafkaAlertPublisher(args.bootstrap, args.alert_topic)
-    layer = SpeedLayer(spark, build_sink(args), publisher)
+    # Without Cassandra (parquet mode) there is nothing to restore state from.
+    loader = CassandraBarLoader(spark, args.keyspace) if args.output_mode == "cassandra" else None
+    layer = SpeedLayer(spark, build_sink(args), publisher, IndicatorState(loader=loader))
     queries = start_queries(spark, args, layer)
     if args.available_now:
         for query in queries:
