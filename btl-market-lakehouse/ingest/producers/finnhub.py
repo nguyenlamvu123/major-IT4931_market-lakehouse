@@ -1,62 +1,101 @@
-"""Finnhub quote poller (small and dependency-light)."""
+"""Finnhub trade websocket (backup feed for US stocks) -> ``stocks.trades``.
+
+Protocol (finnhub.io/docs/api/websocket-trades): connect to
+``wss://ws.finnhub.io?token=<key>``, send ``{"type":"subscribe","symbol":"AAPL"}`` per
+symbol, then receive ``{"type":"trade","data":[{"s","p","v","t","c"}]}`` and periodic
+``{"type":"ping"}``.
+
+The previous version polled ``/quote`` and published volume 0, which made VWAP undefined
+for every Finnhub bar; trades carry real sizes.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 from typing import Any
 
-import requests
+from common.contracts import INSTRUMENTS, make_trade
 
-from common.contracts import make_trade
-
-from ..base import BaseProducer
+from ..base import BaseProducer, KafkaSink, now_ms
 from ..config import ApiSettings
+from .alpaca import DEFAULT_SYMBOLS
+
+WS_URL = "wss://ws.finnhub.io"
 
 
-def parse_finnhub_quote(payload: dict[str, Any], symbol: str) -> dict[str, Any] | None:
-    try:
-        price = float(payload["c"])
-        event_time = int(payload["t"]) * 1000
-    except (KeyError, TypeError, ValueError):
-        return None
-    if price <= 0 or event_time <= 0:
-        return None
-    return make_trade(
-        symbol=symbol.upper(),
-        asset_class="equity",
-        event_time=event_time,
-        price=price,
-        volume=0.0,
-        source="finnhub",
-        metadata={"quote": payload},
-    )
+def parse_finnhub_message(
+    payload: dict[str, Any],
+    ingest_time: int | None = None,
+) -> list[dict[str, Any]]:
+    """Finnhub websocket message -> contract trades (empty for ping/other types).
+
+    Finnhub has no trade id, so ``trade_id`` falls back to the content hash: two trades
+    of the same symbol with equal price, size and millisecond collapse into one. That
+    loss is accepted for a backup feed.
+    """
+    if payload.get("type") != "trade":
+        return []
+    ingest_time = ingest_time if ingest_time is not None else now_ms()
+    records: list[dict[str, Any]] = []
+    for item in payload.get("data") or []:
+        try:
+            symbol = str(item["s"]).upper()
+            instrument = INSTRUMENTS.get(symbol)
+            records.append(
+                make_trade(
+                    symbol=symbol,
+                    asset_class=instrument.asset_class if instrument else "equity",
+                    event_time=int(item["t"]),
+                    price=float(item["p"]),
+                    volume=float(item.get("v") or 0.0),
+                    source="finnhub",
+                    ingest_time=ingest_time,
+                    metadata={"conditions": item.get("c")},
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return records
 
 
 class FinnhubProducer(BaseProducer):
+    source = "finnhub"
+
     def __init__(
         self,
-        kafka: Any,
+        kafka: KafkaSink,
         settings: ApiSettings,
-        symbols: list[str],
-        interval: float = 30.0,
+        symbols: list[str] | None = None,
+        ws_url: str = WS_URL,
     ) -> None:
         super().__init__(kafka)
         if not settings.finnhub_key:
             raise RuntimeError("FINNHUB_API_KEY is required")
         self.settings = settings
-        self.symbols = [symbol.upper() for symbol in symbols]
-        self.interval = interval
+        self.symbols = [symbol.upper() for symbol in (symbols or DEFAULT_SYMBOLS)]
+        self.ws_url = ws_url
+
+    def handle_message(self, raw: str | bytes) -> int:
+        records = parse_finnhub_message(json.loads(raw))
+        for record in records:
+            self.publish(record)
+        return len(records)
+
+    async def consume(self, stop_event: threading.Event) -> None:
+        import websockets
+
+        url = f"{self.ws_url}?token={self.settings.finnhub_key}"
+        async with websockets.connect(url, ping_interval=20) as websocket:
+            for symbol in self.symbols:
+                await websocket.send(json.dumps({"type": "subscribe", "symbol": symbol}))
+            while not stop_event.is_set():
+                try:
+                    raw = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                self.handle_message(raw)
 
     def run(self, stop_event: threading.Event) -> None:
-        while not stop_event.is_set():
-            for symbol in self.symbols:
-                response = requests.get(
-                    "https://finnhub.io/api/v1/quote",
-                    params={"symbol": symbol, "token": self.settings.finnhub_key},
-                    timeout=10,
-                )
-                if response.ok:
-                    record = parse_finnhub_quote(response.json(), symbol)
-                    if record:
-                        self.kafka.send("equity.trades", record["symbol"], record)
-            stop_event.wait(self.interval)
+        asyncio.run(self.consume(stop_event))

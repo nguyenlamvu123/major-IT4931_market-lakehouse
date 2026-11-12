@@ -12,7 +12,7 @@ class KafkaSettings:
     security_protocol: str = "PLAINTEXT"
 
     @classmethod
-    def from_env(cls) -> "KafkaSettings":
+    def from_env(cls) -> KafkaSettings:
         return cls(
             bootstrap=os.getenv("KAFKA_BOOTSTRAP", "localhost:9092"),
             security_protocol=os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
@@ -37,7 +37,7 @@ class ApiSettings:
     fred_key: str = ""
 
     @classmethod
-    def from_env(cls) -> "ApiSettings":
+    def from_env(cls) -> ApiSettings:
         return cls(
             alpaca_key=os.getenv("ALPACA_API_KEY", ""),
             alpaca_secret=os.getenv("ALPACA_SECRET_KEY", ""),

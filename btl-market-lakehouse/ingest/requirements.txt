@@ -1,0 +1,7 @@
+# Runtime dependencies of the ingest image (btl/ingest). pandas arrives with yfinance.
+confluent-kafka>=2.3
+requests>=2.31
+websockets>=12.0
+yfinance>=0.2.40
+prometheus-client>=0.20
+boto3>=1.34
