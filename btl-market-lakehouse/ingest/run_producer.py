@@ -16,6 +16,7 @@ Examples::
     python -m ingest.run_producer --source mock --rows 20 --dry-run
     python -m ingest.run_producer --source binance
     python -m ingest.run_producer --source treasury --interval 3600
+    python -m ingest.run_producer --source replay --speed 10 --rebase-time --loop
 """
 
 from __future__ import annotations
@@ -48,14 +49,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Comma-separated contract symbols; default = the source's registry symbols",
     )
-    parser.add_argument("--file", default="contracts/samples/crypto.trades.jsonl")
+    parser.add_argument(
+        "--file",
+        action="append",
+        default=None,
+        help="replay: JSONL file or directory (repeatable); default contracts/samples",
+    )
+    parser.add_argument(
+        "--s3-uri",
+        default=None,
+        help="replay: bronze prefix on MinIO, e.g. s3://lake/bronze/crypto.trades/dt=2026-11-09/",
+    )
+    parser.add_argument("--speed", type=float, default=1.0, help="replay: 1..100x")
+    parser.add_argument("--max-gap", type=float, default=5.0,
+                        help="replay: cap (seconds) on any wait between two records")
+    parser.add_argument("--rebase-time", action="store_true",
+                        help="replay: stamp records with the current time and fresh ids")
     parser.add_argument("--rows", type=int, default=500)
     parser.add_argument("--days", type=int, default=5, help="mock: synthetic days")
     parser.add_argument(
         "--interval",
         type=float,
         default=None,
-        help="Seconds between polls (REST sources) or between records (mock/replay)",
+        help="Seconds between polls (REST sources) or between records (mock)",
     )
     parser.add_argument("--alpaca-mode", choices=["ws", "rest"], default="ws")
     parser.add_argument(
@@ -85,9 +101,26 @@ def build_source(args: argparse.Namespace, kafka: object) -> object:
             kafka, rows=args.rows, interval=_interval(args, 0.02), loop=args.loop, days=args.days
         )
     if args.source == "replay":
-        from ingest.producers.replay import ReplayProducer
+        from ingest.producers import replay
 
-        return ReplayProducer(kafka, args.file, interval=_interval(args, 0.0), loop=args.loop)
+        def load() -> list[dict]:
+            if args.s3_uri:
+                client = replay.s3_client(
+                    os.getenv("MINIO_ENDPOINT", "http://localhost:9000"),
+                    os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+                    os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+                )
+                return list(replay.iter_s3_records(client, args.s3_uri))
+            return replay.load_local(args.file or ["contracts/samples"])
+
+        return replay.ReplayProducer(
+            kafka,
+            load,
+            speed=args.speed,
+            rebase_time=args.rebase_time,
+            loop=args.loop,
+            max_gap=args.max_gap,
+        )
     if args.source == "binance":
         from ingest.producers.binance_ws import BinanceProducer
 
