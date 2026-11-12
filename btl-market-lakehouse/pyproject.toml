@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "ingest/tests", "streaming/tests", "batch/tests", "serving/tests"]
+testpaths = ["tests", "ingest/tests", "streaming/tests", "batch/tests", "serving/tests", "infra/tests"]
 pythonpath = ["."]
 addopts = "-q"
 

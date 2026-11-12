@@ -1,74 +1,36 @@
+# Full single-machine stack (~12-16 GB RAM): the dev stack (Kafka, MinIO, Cassandra and
+# their init jobs) plus Kafka Connect, Spark standalone, Airflow UI, market-api,
+# kafka-exporter, Prometheus and Grafana. The reference deployment is Kubernetes
+# (`make up`); this file is for machines without minikube.
+#
+#   make images-local    # builds btl/market-api:dev, btl/airflow:dev, btl/kafka-connect-s3:dev
+#   docker compose -f infra/docker-compose.full.yml up -d
+#   bash infra/scripts/init-topics.sh
 name: btl-market-full
 
+include:
+  # Kafka, MinIO (+ bucket init), Cassandra (+ schema init) come from the dev stack so the
+  # two files can never drift apart.
+  - docker-compose.dev.yml
+
 services:
-  kafka:
-    image: bitnami/kafka:3.7
-    container_name: btl-full-kafka
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_CFG_NODE_ID: "1"
-      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      ALLOW_PLAINTEXT_LISTENER: "yes"
-    volumes:
-      - kafka_data:/bitnami/kafka
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    networks:
-      - market
-
-  minio:
-    image: minio/minio:latest
-    container_name: btl-full-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - market
-
-  cassandra:
-    image: cassandra:4.1
-    container_name: btl-full-cassandra
-    environment:
-      CASSANDRA_CLUSTER_NAME: market
-      CASSANDRA_DC: dc1
-      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
-      HEAP_NEWSIZE: 128M
-      MAX_HEAP_SIZE: 768M
-    ports:
-      - "9042:9042"
-    volumes:
-      - cassandra_data:/var/lib/cassandra
-      - ../contracts:/contracts:ro
-    networks:
-      - market
-
   kafka-connect:
-    image: confluentinc/cp-kafka-connect:7.6.1
+    # Built from role A's Connect Dockerfile (Confluent S3 sink plugin baked in); the stock
+    # cp-kafka-connect image has no S3 plugin. Register the sink afterwards with role A's
+    # ingest/kafka_connect/register_connector.sh.
+    image: btl/kafka-connect-s3:dev
     container_name: btl-full-connect
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "8083:8083"
     environment:
-      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_BOOTSTRAP_SERVERS: kafka:29092
       CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
-      CONNECT_GROUP_ID: connect-cluster
+      CONNECT_GROUP_ID: market-connect
       CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
       CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
       CONNECT_STATUS_STORAGE_TOPIC: connect-status
@@ -79,19 +41,36 @@ services:
       CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      # The S3 sink reads AWS_* credentials; MinIO accepts its root user as an access key.
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - market
+
+  kafka-exporter:
+    # Exposes kafka_consumergroup_lag (Kafka Connect group connect-s3-sink-bronze), the
+    # same series Strimzi's kafkaExporter serves on Kubernetes.
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: btl-full-kafka-exporter
+    command: ["--kafka.server=kafka:29092"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9308:9308"
     networks:
       - market
 
   spark-master:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: btl-full-spark-master
-    command: bin/spark-class org.apache.spark.deploy.master.Master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     environment:
-      SPARK_MODE: master
+      SPARK_NO_DAEMONIZE: "true"
     ports:
       - "8080:8080"
       - "7077:7077"
-    volumes:
+    volumes: &spark-code
       - ../streaming:/opt/app/streaming:ro
       - ../batch:/opt/app/batch:ro
       - ../common:/opt/app/common:ro
@@ -100,19 +79,16 @@ services:
       - market
 
   spark-worker:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: btl-full-spark-worker
-    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: "2"
     depends_on:
       - spark-master
-    volumes:
-      - ../streaming:/opt/app/streaming:ro
-      - ../batch:/opt/app/batch:ro
-      - ../common:/opt/app/common:ro
-      - ../contracts:/opt/app/contracts:ro
+    volumes: *spark-code
     networks:
       - market
 
@@ -129,7 +105,10 @@ services:
       - market
 
   airflow:
-    image: apache/airflow:2.9.2
+    # Same image as Kubernetes (infra/airflow/Dockerfile). The DAG submits SparkApplications
+    # to Kubernetes, so here Airflow is only for browsing/validating the DAG; nightly runs
+    # happen on the cluster (`make up`).
+    image: btl/airflow:dev
     container_name: btl-full-airflow
     command: standalone
     depends_on:
@@ -138,28 +117,29 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "8081:8080"
-    volumes:
-      - ../batch/dags:/opt/airflow/dags:ro
-      - ../batch:/opt/app/batch:ro
-      - ../common:/opt/app/common:ro
-      - ../contracts:/opt/app/contracts:ro
     networks:
       - market
 
   market-api:
-    image: btl/market-api:latest
+    image: btl/market-api:dev
     container_name: btl-full-market-api
     environment:
       CASSANDRA_HOSTS: cassandra
+      CASSANDRA_PORT: "9042"
       CASSANDRA_KEYSPACE: market
-      DEMO_DATA_DIR: /app/data/demo
+      # Local stacks may show synthetic data while Cassandra is still empty; every response
+      # says so in the X-Data-Source header. Kubernetes sets this to false.
+      DEMO_FALLBACK: "true"
     ports:
       - "8000:8000"
     depends_on:
-      - cassandra
+      cassandra-init:
+        condition: service_completed_successfully
     networks:
       - market
 
@@ -170,8 +150,13 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # Producers (:8001) and the streaming driver (:9108) usually run on the host during
+    # development; host.docker.internal lets Prometheus scrape them.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - market-api
+      - kafka-exporter
     networks:
       - market
 
@@ -194,12 +179,5 @@ services:
       - market
 
 volumes:
-  kafka_data:
-  minio_data:
-  cassandra_data:
   postgres_data:
   grafana_data:
-
-networks:
-  market:
-    driver: bridge
