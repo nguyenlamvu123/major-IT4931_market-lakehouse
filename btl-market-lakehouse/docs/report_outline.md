@@ -1,58 +1,82 @@
-# Report outline
+# Dàn ý báo cáo
 
-## 1. Problem and scope
+PDF mục 5: "mỗi người viết chương báo cáo của mình theo mẫu 4 phần (vấn đề, giải pháp,
+số liệu, bài học), trình bày slide phần mình". D ghép báo cáo và slide tổng (việc D.7).
 
-- Monitor US equities, gold, crypto and US Treasury yields in near realtime.
-- Two paths: speed layer for 1-minute bars/alerts, batch layer for daily analytics/ML.
-- Four roles with separate branches; no merge into `main` for submission.
+## Chương 1. Đặt vấn đề và phạm vi (D)
 
-## 2. Architecture
+- Giá cổ phiếu, vàng, crypto, trái phiếu thay đổi từng giây. Cần hai thứ cùng lúc: cảnh
+  báo trong vài giây và phân tích lịch sử nhiều năm.
+- Phạm vi gồm 4 lớp tài sản cộng chỉ số USD:
+  - cổ phiếu Mỹ (kèm ETF GLD, TLT/IEF/SHY);
+  - vàng (GC=F);
+  - crypto;
+  - lợi suất trái phiếu Mỹ;
+  - DXY.
+- Ngoài phạm vi: không đặt lệnh thật, không tư vấn đầu tư; chỉ dùng nguồn miễn phí (feed
+  IEX chỉ có một phần khối lượng).
 
-- Ingestion: producers -> Kafka -> Kafka Connect S3 sink.
-- Speed: Spark Structured Streaming -> Cassandra.
-- Batch: MinIO bronze/silver/gold -> Spark jobs -> Airflow.
-- Serving: FastAPI -> Grafana; Prometheus for infra health.
-- Include the diagram from `docs/architecture.md`.
+## Chương 2. Kiến trúc Lambda (D)
 
-## 3. Role implementation
+- Sơ đồ và bảng thành phần: `docs/architecture.md`.
+- Hợp đồng giữa các vai trong `contracts/`: topic, schema, đường dẫn MinIO, bảng Cassandra,
+  hạ tầng.
+- Giải thích lựa chọn: MinIO thay HDFS, Cassandra cho tầng phục vụ, operator trên Kubernetes.
 
-| Role | Evidence |
+## Chương 3–6. Mỗi vai một chương, cùng mẫu 4 phần
+
+| Phần | Nội dung | Ví dụ ở vai D |
+|---|---|---|
+| 1. Vấn đề | Tình huống cụ thể gặp trong đề tài | Một máy 16 GB phải chạy Kafka, Cassandra, Spark, Airflow, Prometheus; CI không chạy; dashboard có thể hiện số giả |
+| 2. Giải pháp và các cách đã thử | Cách làm, phương án đã bỏ và lý do | Operator thay manifest tự viết; `make up` chạy theo thứ tự; `DEMO_FALLBACK=false` + header `X-Data-Source` |
+| 3. Số liệu | Bảng hoặc biểu đồ từ `docs/metrics.md` | Thời gian `make up`, thời gian phục hồi của 6 kịch bản lỗi, RAM toàn cụm |
+| 4. Bài học | Điều rút ra, kèm số liệu | "Validate manifest trong CI (kustomize + kubeconform) bắt lỗi trước khi lên cụm" |
+
+| Chương | Vai | Bằng chứng trong repo |
+|---|---|---|
+| 3 | A: Thu thập & Kafka | `ingest/`, `contracts/samples`, KafkaConnect S3 sink, số liệu msg/s mỗi topic |
+| 4 | B: Speed layer | `streaming/`, watermark, nến 1m/5m, exactly-once, độ trễ < 10 s |
+| 5 | C: Batch layer | `batch/`, bronze/silver/gold, tương quan với lợi suất, đường cong lợi suất, MLlib, Airflow, bảng tối ưu trước/sau |
+| 6 | D: Hạ tầng & Dashboard | `infra/`, `serving/`, `.github/`, dashboard thị trường và giám sát, thử lỗi |
+
+## Chương 7. Kết quả phân tích (C chủ trì, cả nhóm)
+
+Trả lời các câu hỏi trên slide "So sánh với trái phiếu chính phủ Mỹ":
+
+- Cổ phiếu và trái phiếu (SPY với TLT) đi cùng hay ngược chiều?
+- Đường cong lợi suất đảo ngược (10Y−2Y < 0) báo hiệu gì?
+- Vàng (GLD, GC=F) có ngược chiều lợi suất thực (REAL10Y) không?
+- Vào ngày thị trường có cảnh báo, tiền chạy về đâu?
+
+Số liệu lấy từ dashboard thị trường: ma trận tương quan và đường cong lợi suất.
+
+## Chương 8. Lessons learned (cả nhóm)
+
+Theo 11 mảng của PDF ý tưởng (slide Lessons learned 1/3–3/3). Mỗi mảng viết theo mẫu:
+vấn đề → các cách đã thử → giải pháp kèm số liệu → bài học. Nhật ký thô nằm trong
+`docs/lessons/`.
+
+| Mảng | Vai chính |
 |---|---|
-| A | `ingest/`, `contracts/`, producer tests, Kafka Connect config |
-| B | `streaming/`, OHLCV/indicator logic, Cassandra sink, streaming job |
-| C | `batch/`, medallion jobs, MLlib, Airflow DAG |
-| D | `infra/`, `serving/`, K8s manifests, monitoring, CI |
+| 1. Thu thập dữ liệu | A |
+| 2. Xử lý Spark | B, C |
+| 3. Xử lý luồng | B |
+| 4. Lưu trữ | C |
+| 5. Tích hợp hệ thống | D |
+| 6. Tối ưu hiệu năng | C |
+| 7. Giám sát, debug | D |
+| 8. Mở rộng | D, A |
+| 9. Chất lượng, kiểm thử | C, D |
+| 10. Bảo mật, quản trị | D |
+| 11. Chịu lỗi | D, B |
 
-## 4. Data contracts
+## Chương 9. Demo và kết luận (D)
 
-- Topics: `market.trades`, `market.quotes`, `market.rates`.
-- Schemas and CQL in `contracts/`; at-least-once delivery; idempotent batch writes.
-- Bronze/silver/gold paths and partitioning.
+- Kịch bản demo: `docs/demo_script.md`, kèm video dự phòng (việc D.7).
+- Giới hạn: cấu hình dev chỉ có 1 broker và 1 node Cassandra; nguồn dữ liệu miễn phí.
 
-## 5. Demo results
+## Phụ lục
 
-- Local pipeline: 2,397 trades, 17 symbols, 2,397 bars, 8 alerts.
-- Batch: 1,833 silver trades, 273 daily rows, 78 correlation pairs, 20 ML rows,
-  30 yield-curve rows.
-- Tests: 7 passing on D, 9 passing at C-airflow.
-- Screenshots to add: Grafana overview, alerts table, Airflow DAG, Kafka topics.
-
-## 6. Operations
-
-- Dev/full Compose, Kubernetes manifests, health checks, fault injection.
-- Resource limits and why the full stack was not run locally (3.6 GB free disk).
-- Recovery steps from `docs/runbook.md`.
-
-## 7. Limitations and lessons
-
-- Single-broker Kafka, single-node Cassandra, no schema registry.
-- Spark/Cassandra integration not executed on the current machine.
-- API falls back to demo data only when Cassandra is unavailable at startup.
-- Lessons: contracts first, local demo unblocks integration, branch isolation helps
-  parallel work but requires an explicit integration step.
-
-## 8. References
-
-- Course assignment PDF and role split.
-- Spark Structured Streaming, Kafka Connect S3, Cassandra, Airflow, Grafana docs.
-- Repository branch map in `docs/branching.md`.
+- Runbook: `docs/runbook.md`
+- Quy trình GitHub: `docs/github-workflow.md`
+- Bản đồ nhánh: `docs/branching.md`
