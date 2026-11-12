@@ -1,641 +1,320 @@
 # Hướng dẫn điều phối 4 đầu mối A/B/C/D
 
-> Dành cho trưởng nhóm và 4 đầu mối vai A, B, C, D.
-> Mục tiêu: mỗi người biết mình sở hữu gì, làm trên branch nào, kiểm tra bằng lệnh gì,
-> bàn giao cho ai và không phá vỡ quy ước chung của repo.
+> Tài liệu cho trưởng nhóm và 4 đầu mối vai A, B, C, D. Đọc xong, mỗi người biết: mình sở
+> hữu gì, làm trên branch nào, kiểm tra bằng lệnh gì, bàn giao cho ai, và không phá quy ước
+> chung của repo.
 >
-> Cập nhật: 2026-11-12.
+> Cập nhật ngày 12/11/2026, theo **hợp đồng v2** bám sát PDF *BTL-IT4931 Kiến trúc – Phân
+> công* (09/11/2026). Mọi thay đổi so với bản trước, danh sách nhánh con và kết quả kiểm thử
+> nằm trong `docs/thay-doi-theo-pdf.md` (có trên `main` và cả 4 nhánh vai).
 
-## 0. Mục tiêu và nguyên tắc bất di bất dịch
+## 0. Nguyên tắc bất di bất dịch
 
-1. `main` chỉ chứa phần nền dùng chung: `common/`, `scripts/`, `tests/`, `docs/`,
-   `README.md`, `Makefile`, cấu hình Python.
-2. Có **4 branch lớn**, mỗi vai sở hữu một branch:
-   `feature/A-ingest`, `feature/B-streaming`, `feature/C-batch`, `feature/D-infra`.
-3. Branch con chỉ merge vào branch lớn tương ứng. **Không merge branch vai vào `main`**.
-4. Không merge branch vai này vào branch vai khác. Nếu cần tích hợp, tạo riêng branch
-   `integration` và merge ở đó sau khi review.
-5. `contracts/` là nguồn sự thật cho topic, schema, sample và Cassandra CQL. Thay đổi
-   contract phải được ít nhất một vai khác review.
-6. Không commit `.env`, API key, dữ liệu runtime trong `data/`, `__pycache__/`,
-   checkpoint, log hoặc file dung lượng lớn.
-7. Máy hiện tại **không đủ tài nguyên chạy full stack**. Ưu tiên local demo,
-   `pytest`, `docker compose config`; chỉ chạy full stack trên máy đủ RAM/đĩa.
+1. `main` chỉ giữ phần nền dùng chung: `contracts/` (hợp đồng v2), `common/`, `scripts/`,
+   `tests/`, `docs/`, `README.md`, `Makefile`, cấu hình Python.
+2. Có **4 branch lớn**, mỗi vai sở hữu một: `feature/A-ingest`, `feature/B-streaming`,
+   `feature/C-batch`, `feature/D-infra`.
+3. Mỗi việc là **một branch con** tạo từ branch lớn của vai, xong thì merge `--no-ff` trở lại
+   branch lớn đó. **Không merge branch vai vào `main`**, và không merge branch vai này vào
+   branch vai khác.
+4. Thay đổi dùng chung chỉ đi một chiều: `main` → 4 branch lớn (`git merge main`). Muốn
+   tích hợp cả 4 vai thì tạo riêng branch `integration`.
+5. `contracts/` (trên `main`) là nguồn sự thật cho topic, schema, sample, đường dẫn MinIO,
+   bảng Cassandra và tên hạ tầng. Đổi hợp đồng phải được vai nhận dữ liệu review, và
+   `tests/test_contracts.py` phải xanh.
+6. Không commit `.env`, API key, `data/`, checkpoint, log hay file lớn.
+7. Quy ước tên nhánh và PR vào `main` trong PDF (mục 7–8) **đang tạm hoãn**. Nhóm sẽ quyết
+   lại khi tích hợp.
 
 ## 1. Bản đồ branch và quyền sở hữu
 
-| Vai | Branch lớn | Branch con | Thư mục sở hữu | Bàn giao chính |
-|---|---|---|---|---|
-| A | `feature/A-ingest` | `A-contracts`, `A-producers`, `A-kafka-connect` | `contracts/`, `ingest/` | Topic/schema/sample cho B, bronze cho C |
-| B | `feature/B-streaming` | `B-ohlcv`, `B-indicators`, `B-cassandra`, `B-job` | `streaming/` | Bảng Cassandra/alert cho D |
-| C | `feature/C-batch` | `C-medallion`, `C-mllib`, `C-airflow` | `batch/` | Gold data/ML cho D, báo cáo cho nhóm |
-| D | `feature/D-infra` | `D-compose`, `D-k8s`, `D-dashboards`, `D-ci` | `infra/`, `serving/`, `.github/`, `docs/` | Runtime, API, dashboard, CI, runbook |
+| Vai | Branch lớn | Thư mục sở hữu | Bàn giao chính |
+|---|---|---|---|
+| A | `feature/A-ingest` | `ingest/` (và `contracts/` trên `main` theo CODEOWNERS) | Dữ liệu trong 7 topic cho B, C; bronze trên MinIO cho C |
+| B | `feature/B-streaming` | `streaming/` | Bảng realtime trong Cassandra và topic `alerts` cho D |
+| C | `feature/C-batch` | `batch/` | silver/gold trên MinIO, bảng batch trong Cassandra, kết quả ML cho D |
+| D | `feature/D-infra` | `infra/`, `serving/`, `.github/` (ở gốc git), `docs/` chung | Cụm K8s (`make up`), Compose dev, market-api, dashboard, CI |
 
-### 1.1. Luồng dữ liệu tổng quát
+Các branch con của từng vai, cùng nội dung của chúng, liệt kê ở `docs/thay-doi-theo-pdf.md`
+mục 3.
+
+### 1.1. Luồng dữ liệu (hợp đồng v2)
 
 ```text
-Nguồn dữ liệu
-  -> A: producers -> Kafka -> A: Kafka Connect S3 sink -> MinIO bronze
-  -> B: Spark Structured Streaming -> Cassandra (bars, alerts, latest_price)
-  -> C: Spark batch -> MinIO silver/gold (daily, correlation, yield, ML)
-  -> D: FastAPI -> Grafana; Prometheus giám sát hạ tầng
+Binance ─┐                      ┌─ crypto.trades ─┐
+Alpaca  ─┤                      ├─ stocks.trades ─┤      B: Spark Streaming (update, 5 s)
+Finnhub ─┼─ A: producers ─Kafka─┼─ stocks.bars    ├────► ohlcv_1m, ohlcv_5m, indicators_latest,
+Yahoo   ─┤   (key = symbol)     ├─ gold.quotes    │      alerts_by_day  + topic alerts
+FRED/   ─┘                      ├─ fx.dxy ────────┘
+Treasury                        └─ rates.yields (key = tenor)
+                                       │ A: Kafka Connect S3 sink
+                                       ▼
+            MinIO s3a://lake/bronze/<topic>/dt=YYYY-MM-DD/
+                                       │ C: bronze→silver → kiểm tra chất lượng → silver→gold
+                                       ▼              (Airflow 01:00 UTC)
+            silver/{trades,bars,yields,alerts}, gold/{daily_summary,correlation_matrix,
+            yield_curve,ml_features,asset_clusters}  ──► Cassandra (bảng batch)
+                                       │
+                 D: market-api ──► Grafana (dashboard thị trường)
+                 Prometheus  ──► Grafana (dashboard giám sát: Kafka lag, Spark, CPU/RAM)
 ```
 
-### 1.2. Trạng thái hiện tại
+Cassandra là nơi hai luồng gặp nhau: B ghi bảng realtime, C ghi bảng batch, D đọc cả hai.
 
-- Cả 4 branch lớn đã có code và đã merge các branch con.
-- `main` đang giữ phần nền, không chứa code của A/B/C/D.
-- D đã có Compose, K8s, API, Prometheus/Grafana, CI, tài liệu và fault injection.
-- Full stack chưa chạy được trên máy hiện tại vì đĩa còn khoảng 3.6 GB; các file
-  Compose/K8s đã được validate.
+### 1.2. Trạng thái hiện tại (12/11/2026, tuần 1)
+
+- Hợp đồng v2 đã chốt và nằm trên `main`, đã merge vào cả 4 branch lớn.
+- 4 branch lớn đều có code theo hợp đồng v2 và test xanh: A 73, B 60, C 59, D 127 test.
+  `main` có 26 test.
+- **Chưa chạy trên cụm hay Docker thật.** Danh sách việc cần cụm thật và các rủi ro nằm ở
+  `docs/thay-doi-theo-pdf.md`, mục 7–8.
 
 ## 2. Chuẩn bị chung cho cả 4 đầu mối
 
-### 2.1. Vào đúng thư mục
+### 2.1. Cài môi trường
 
 ```bash
-cd "/media/zaibachkhoa/education/GenAI 2025/Lưu trữ và xử lí dữ liệu lớn/btl-market-lakehouse"
-git status
-git branch --show-current
+cd btl-market-lakehouse
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # điền API key của bạn; không bao giờ commit .env
 ```
 
-### 2.2. Cài môi trường tối thiểu
+- Nếu Ubuntu báo thiếu `ensurepip`: `sudo apt install python3-venv`, hoặc tạo venv bằng
+  `python3 -m venv --without-pip .venv` rồi cài pip bằng `get-pip.py`.
+- Test Spark của B, C cần **Java 17**: `export JAVA_HOME=...`. Không có Java thì các test
+  này tự bỏ qua.
+- Đặt git bằng tên và email GitHub của chính bạn (PDF mục 7.2), để lịch sử commit thể hiện
+  đúng ai làm phần nào.
 
-Không nên cài toàn bộ `requirements.txt` nếu máy thiếu đĩa, vì có `pyspark`,
-`confluent-kafka`, `yfinance`... Trên máy hiện tại dùng bộ tối thiểu:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install pandas pyarrow numpy requests python-dotenv PyYAML pytest \
-  fastapi "uvicorn[standard]" prometheus-client
-```
-
-Nếu cần chạy producer/Kafka thật, cài thêm theo hướng dẫn của vai A. Nếu cần Spark,
-chỉ chạy trên máy đã có Java và đủ tài nguyên.
-
-### 2.3. Kiểm tra nền dùng chung
-
-Chạy trên branch bất kỳ:
+### 2.2. Kiểm tra phần nền dùng chung
 
 ```bash
-make demo
+python scripts/generate_samples.py   # 20 dòng mẫu cho mỗi topic trong contracts/samples
+make demo                            # pandas, không cần Kafka/Spark/Cassandra
 make verify
 make test
 ```
 
-Kết quả demo mong đợi:
-
-- `data/demo/trades.jsonl`
-- `data/demo/bars.jsonl`
-- `data/demo/alerts.json`
-- `data/demo/daily_summary.csv`
-- `data/demo/correlation_matrix.csv`
-- `data/demo/yield_curve.csv`
-- `data/demo/ml_features.csv`
-- `data/demo/summary.json`
-
-`make demo` không cần Kafka, Spark, Cassandra hay Docker. Đây là bài kiểm tra nhanh
-nhất để biết branch có làm hỏng logic dùng chung hay không.
+`data/demo/summary.json` trả lời 3 câu hỏi trong slide "So sánh với trái phiếu" trên dữ
+liệu giả lập: `corr_TLT_US10Y`, `corr_GLD_REAL10Y`, `corr_SPY_TLT`.
 
 ## 3. Quy trình branch, commit và merge
 
-### 3.1. Tạo branch con
-
-Luôn tạo branch con từ branch lớn hiện tại:
-
 ```bash
-git checkout feature/A-ingest
-git pull --ff-only 2>/dev/null || true
-git checkout -b feature/A-ten-task
+git checkout feature/B-streaming
+git merge main                                   # nhận hợp đồng/common mới nhất
+git checkout -b feature/B-<việc>                 # một việc = một branch con
+# sửa code, chạy test
+git add <file>
+git commit -m "feat(B-<việc>): <làm gì>"         # Conventional Commits
+git checkout feature/B-streaming
+git merge --no-ff feature/B-<việc> -m "merge(B): <mô tả>"
 ```
 
-Ví dụ tên branch: `feature/A-producers`, `feature/B-cassandra`,
-`feature/C-mllib`, `feature/D-dashboards`.
-
-### 3.2. Commit
+Trước khi bàn giao:
 
 ```bash
-git status
-git diff
-git add <các-file-cần-thiết>
-git -c user.name='BTL Team' -c user.email='nguyenlamvu123@gmail.com' \
-  commit -m "feat(B-indicators): thêm RSI/MACD và alert z-score"
+python -m pytest -q
+python -m ruff check .
 ```
 
-Quy ước message:
+Quy tắc review:
 
-- `feat(<vai>-<phần>): ...` cho tính năng mới.
-- `fix(<vai>-<phần>): ...` cho sửa lỗi.
-- `docs(<vai>-<phần>): ...` cho tài liệu.
-- Không commit file rác, secret, dữ liệu runtime.
+- A đổi hợp đồng thì B hoặc C phải review.
+- B/C đổi cột ghi Cassandra thì phải khớp `contracts/cassandra.cql`; test dùng
+  `common.cql.load_tables()` sẽ bắt chỗ lệch.
+- C đổi đường dẫn silver/gold thì sửa `contracts/paths.yaml` và báo D.
+- D đổi namespace, service, secret hay cổng thì sửa `contracts/infra.yaml` và báo A/B/C.
+- Không force-push branch đã chia sẻ.
 
-### 3.3. Merge branch con vào branch lớn
+## 4. Đầu mối A: Thu thập dữ liệu và Kafka
 
-```bash
-git checkout feature/A-ingest
-git merge --no-ff feature/A-ten-task -m "merge(A): <mô tả>"
-```
-
-Sau merge:
-
-```bash
-git log --oneline --graph --decorate -10
-git status
-```
-
-### 3.4. Kiểm tra trước khi bàn giao
-
-```bash
-python -m pytest
-python -m compileall -q common scripts tests <thư-mục-vai>
-```
-
-Nếu vai có Docker/K8s:
-
-```bash
-docker compose -f infra/docker-compose.dev.yml config -q
-docker compose -f infra/docker-compose.full.yml config -q
-```
-
-### 3.5. Quy tắc review
-
-- A thay đổi `contracts/` phải được B hoặc C review.
-- B thay đổi schema đọc/ghi Cassandra phải khớp `contracts/cassandra/schema.cql`.
-- C thay đổi đường dẫn gold/silver phải thông báo D và cập nhật README.
-- D thay đổi port, biến môi trường, endpoint API phải thông báo A/B/C.
-- Không merge thẳng vào `main`; không force-push branch đã chia sẻ.
-
-## 4. Đầu mối A - Thu thập dữ liệu và Kafka
-
-### 4.1. Phạm vi
-
-- Sở hữu `contracts/` và `ingest/`.
-- Định nghĩa topic, JSON schema, sample, Cassandra CQL.
-- Viết producer cho crypto, equity, vàng, FX, lợi suất; hỗ trợ `mock`/`replay`.
-- Cấu hình Kafka Connect S3 sink ghi bronze.
-
-### 4.2. File quan trọng
+**Một câu (PDF):** giá từ 4 nguồn chảy vào Kafka liên tục, đúng định dạng, kể cả khi sàn Mỹ
+đóng cửa.
 
 | File | Vai trò |
 |---|---|
-| `contracts/topics.yaml` | Tên topic, partition, retention |
-| `contracts/schemas/trade.schema.json` | Contract trade |
-| `contracts/schemas/rate_tick.schema.json` | Contract rate |
-| `contracts/schemas/alert.schema.json` | Contract alert |
-| `contracts/cassandra/schema.cql` | Bảng Cassandra dùng chung |
-| `contracts/samples/*.jsonl` | Dữ liệu mẫu cho replay/test |
-| `ingest/run_producer.py` | Entrypoint producer |
-| `ingest/producers/*.py` | Binance, Alpaca, Finnhub, Yahoo, FRED, mock, replay |
-| `ingest/kafka_connect/s3-sink.json` | Connector S3 |
-| `ingest/README.md` | Hướng dẫn chi tiết |
-
-### 4.3. Lệnh kiểm tra
-
-Dry-run, không cần Kafka:
+| `ingest/run_producer.py` | Entrypoint: `--source binance\|alpaca\|finnhub\|yahoo\|fred\|treasury\|mock\|replay\|backfill` |
+| `ingest/producers/` | Binance WS, Alpaca IEX WS (trade + nến 1Min), Finnhub WS, Yahoo (GC=F, DXY), FRED, Treasury CSV, mock, replay |
+| `ingest/backfill_yfinance.py` | Nến ngày nhiều năm của mọi mã, đẩy vào `stocks.bars` |
+| `ingest/kafka_connect/` | S3 sink sang bronze (2 connector: dữ liệu và alerts), Dockerfile `btl/kafka-connect-s3` |
+| `ingest/k8s/` | Deployment producer (ns `market`), KafkaConnect/KafkaConnector (ns `kafka`), ServiceMonitor |
+| `ingest/tools/` | `topic_rates.py` (tin/giây mỗi topic), `feed_quality.py` (% trùng/muộn), `bench_publish.py` |
 
 ```bash
-git checkout feature/A-ingest
-python ingest/run_producer.py --source mock --rows 20 --dry-run
-python ingest/run_producer.py --source replay \
-  --file contracts/samples/equity.trades.jsonl --dry-run
+python -m ingest.run_producer --source mock --rows 50 --dry-run --metrics-port 0
+python -m ingest.run_producer --source replay --file contracts/samples --speed 100 --dry-run
+export KAFKA_BOOTSTRAP=localhost:9092
+python -m ingest.run_producer --source binance
+python -m ingest.run_producer --source treasury --interval 3600
+python -m ingest.backfill_yfinance --years 3
 python -m pytest ingest/tests -q
 ```
 
-Chạy với Kafka:
+**Xong khi (PDF):** 4 nguồn chạy liên tục 1 giờ trên K8s không lỗi, và có số tin nhắn/giây
+cho từng topic. Ghi kết quả vào `docs/metrics/A-ingest.md`.
 
-```bash
-export KAFKA_BOOTSTRAP=localhost:9092
-python ingest/run_producer.py --source binance --symbols BTCUSDT,ETHUSDT
-python ingest/run_producer.py --source fred --interval 3600
-```
+**Bàn giao:**
 
-Đăng ký S3 sink (sau khi có Connect image có plugin S3):
+- Cho B và C: 7 topic theo hợp đồng, khóa `symbol` (riêng `rates.yields` dùng `tenor`),
+  `trade_id` tất định, mẫu trong `contracts/samples/`.
+- Cho C: bronze theo `contracts/paths.yaml`.
+- Cho D: tên Deployment, cổng metrics 8001, secret `market-api-keys`.
 
-```bash
-bash ingest/kafka_connect/register_connector.sh
-```
+**Rủi ro:**
 
-### 4.4. Điều kiện hoàn thành
+- Giới hạn tần suất API. Đã có backoff, circuit breaker, và các nguồn không cần key.
+- Feed IEX miễn phí chỉ chiếm một phần khối lượng toàn thị trường.
 
-- [ ] Topic/schema/CQL được review bởi B hoặc C.
-- [ ] `mock` và `replay` dry-run chạy được.
-- [ ] `pytest ingest/tests` pass.
-- [ ] Producer dùng key `symbol`/`tenor`, đảm bảo thứ tự theo symbol.
-- [ ] `trade_id` deterministic, hỗ trợ ghi idempotent.
-- [ ] Không có API key trong code; chỉ dùng biến môi trường.
-- [ ] Sample JSONL khớp schema.
-- [ ] README ghi rõ source matrix và cách chạy.
+## 5. Đầu mối B: Speed layer
 
-### 4.5. Bàn giao
-
-- Cho B: tên topic, key, schema, sample, tần suất, watermark mong đợi.
-- Cho C: format bronze, đường dẫn/partition, `trade_id`, sample rates.
-- Cho D: danh sách service/port/env cần dùng cho Compose/K8s.
-
-### 4.6. Rủi ro
-
-- Schema thay đổi đột ngột làm B/C đọc sai.
-- Producer thiếu key làm mất thứ tự theo symbol.
-- Rate limit/API key của nguồn ngoài; luôn có `mock`/`replay` dự phòng.
-
-## 5. Đầu mối B - Speed layer / Streaming
-
-### 5.1. Phạm vi
-
-- Sở hữu `streaming/`.
-- Đọc Kafka, tạo nến 1 phút, VWAP, chỉ báo, alert.
-- Ghi Cassandra và có thể ghi alert topic.
-- Quản lý checkpoint, watermark, chế độ Parquet khi không có Cassandra.
-
-### 5.2. File quan trọng
+**Một câu (PDF):** biến dòng giao dịch rời rạc thành nến giá, chỉ báo và cảnh báo trong
+vài giây.
 
 | File | Vai trò |
 |---|---|
-| `streaming/job.py` | Entrypoint Spark Structured Streaming |
-| `streaming/schemas.py` | Schema đọc Kafka |
-| `streaming/ohlcv.py` | Logic nến 1 phút |
-| `streaming/batch_logic.py` | Logic indicator/alert cho từng micro-batch |
-| `streaming/indicators.py` | Wrapper chỉ báo |
-| `streaming/alerts.py` | Luật alert |
-| `streaming/cassandra_sink.py` | Ghi Cassandra idempotent |
-| `streaming/tests/` | Test logic không cần Spark |
-| `streaming/README.md` | Hướng dẫn chi tiết |
-
-### 5.3. Lệnh kiểm tra
+| `streaming/job.py` | 2 query: `speed-ohlcv-1m`, `speed-ohlcv-5m`. Output mode update, trigger 5 s, watermark 30 s, bỏ trùng `trade_id`, nguồn Kafka hoặc `--source files` |
+| `streaming/state.py` | `IndicatorState` giữ 60 nến/mã qua các batch, nạp lại từ Cassandra khi khởi động lại; tính chỉ báo và cảnh báo |
+| `streaming/sinks.py`, `columns.py` | Ghi `ohlcv_1m`, `ohlcv_5m`, `indicators_latest`, `alerts_by_day` đúng cột hợp đồng; ghi topic `alerts` |
+| `streaming/metrics.py` | Gauge Prometheus trên cổng 9108 |
+| `streaming/tools/` | `measure_latency.py`, `exactly_once_check.py`, `local_latency_run.py` |
+| `streaming/k8s/speed-layer.yaml` | SparkApplication (ns `spark`), Service, PodMonitor |
 
 ```bash
-git checkout feature/B-streaming
-python -m pytest streaming/tests -q
+spark-submit streaming/job.py --source files --input contracts/samples --available-now \
+  --output-mode parquet --parquet-path /tmp/speed --checkpoint-root /tmp/checkpoints --metrics-port 0
+JAVA_HOME=/path/to/jdk17 python -m pytest streaming/tests -q
+python -m streaming.tools.local_latency_run --seconds 60
 ```
 
-Chạy Spark thật (cần Java/Spark/Kafka):
+**Xong khi (PDF):** nến 1 phút có trong Cassandra chậm dưới khoảng 10 giây so với thời điểm
+giao dịch.
 
-```bash
-spark-submit \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0 \
-  streaming/job.py \
-  --bootstrap localhost:9092 \
-  --checkpoint s3a://checkpoints/speed \
-  --cassandra-host cassandra
-```
+- Đo local: p95 2,1 s.
+- Còn phải đo trên cụm bằng `measure_latency.py`, và chứng minh exactly-once bằng cách xoá
+  pod driver (`infra/fault_injection/k8s/kill_spark_driver.sh`).
 
-Chạy không cần Cassandra, ghi Parquet:
+## 6. Đầu mối C: Batch layer và Data Lake
 
-```bash
-spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
-  streaming/job.py \
-  --checkpoint /tmp/checkpoints/speed \
-  --output-mode parquet \
-  --parquet-path /tmp/speed/bars
-```
-
-### 5.4. Điều kiện hoàn thành
-
-- [ ] Schema đọc khớp `contracts/schemas/trade.schema.json`.
-- [ ] OHLCV 1 phút có open/high/low/close/volume/vwap/trade_count.
-- [ ] Indicator/alert chạy đúng trên batch logic test.
-- [ ] Cassandra ghi upsert theo khóa chính, replay không tạo bản ghi trùng.
-- [ ] Có watermark 2 phút và `failOnDataLoss=false`.
-- [ ] Checkpoint được cấu hình rõ.
-- [ ] README ghi rõ chế độ Cassandra/Parquet và giới hạn.
-- [ ] `pytest streaming/tests` pass.
-
-### 5.5. Bàn giao
-
-- Cho D: keyspace, bảng, cột, kiểu dữ liệu, endpoint cần đọc.
-- Cho nhóm: cách chạy, checkpoint, package Spark, hành vi khi mất dữ liệu.
-- Cho A: phản hồi nếu schema/key không đúng.
-
-### 5.6. Rủi ro
-
-- Không có Java/Spark trên máy hiện tại: chỉ test logic, không chạy job thật.
-- Indicator tính theo micro-batch chưa giữ state dài hạn; ghi rõ trong báo cáo.
-- Event trễ hơn watermark bị drop; cần nêu trong phần giới hạn.
-
-## 6. Đầu mối C - Batch layer / Data Lake
-
-### 6.1. Phạm vi
-
-- Sở hữu `batch/`.
-- Bronze -> silver -> gold; dedupe, daily bars, correlation, yield curve, ML features.
-- MLlib KMeans cho regime tài sản.
-- Airflow DAG điều phối batch.
-
-### 6.2. File quan trọng
+**Một câu (PDF):** giữ kho lịch sử gọn gàng, và mỗi đêm tính ra những con số chính xác,
+sâu hơn luồng realtime.
 
 | File | Vai trò |
 |---|---|
-| `batch/jobs/bronze_to_silver.py` | Làm sạch, dedupe, ghi silver |
-| `batch/jobs/silver_to_gold.py` | Daily/correlation/yield/features |
-| `batch/jobs/train_kmeans.py` | MLlib KMeans |
-| `batch/run_local_batch.py` | Chạy toàn bộ batch bằng pandas |
-| `batch/transforms.py` | Logic transform dùng chung |
-| `batch/ml_features.py` | Feature engineering |
-| `batch/dags/market_lakehouse_dag.py` | DAG Airflow |
-| `batch/tests/` | Test transform/DAG/ML features |
-| `batch/README.md` | Hướng dẫn chi tiết |
-
-### 6.3. Lệnh kiểm tra
-
-Local, không cần Spark/MinIO:
+| `batch/jobs/bronze_to_silver.py` | Đọc từng `<topic>/dt=`; làm sạch, bỏ trùng, chuẩn UTC; ghi silver trades/bars/yields/alerts |
+| `batch/jobs/quality_checks.py` | Cổng chất lượng giữa silver và gold: báo cáo `gold/_quality`, exit 1 khi có lỗi |
+| `batch/gold.py`, `batch/jobs/silver_to_gold.py` | daily_summary (ưu tiên nến ngày > trades > nến phút), tương quan 90 ngày với US2Y/US10Y/REAL10Y theo lịch SPY + forward-fill, yield curve |
+| `batch/jobs/cassandra_sink.py` | Ghi `daily_summary`, `correlation_matrix`, `yield_curve`, `asset_clusters` |
+| `batch/jobs/train_kmeans.py` | KMeans phân cụm tài sản, tính silhouette |
+| `batch/jobs/benchmark.py` | Số đo trước/sau: AQE, broadcast, partition, cache, pruning |
+| `batch/dags/`, `batch/k8s/` | DAG `0 1 * * *` dùng `SparkKubernetesOperator` + 5 template SparkApplication |
 
 ```bash
-git checkout feature/C-batch
 python batch/run_local_batch.py
-python -m pytest batch/tests -q
+export LAKE=file:///tmp/lake
+python batch/jobs/bronze_to_silver.py --lake $LAKE --start 2026-09-01 --end 2026-11-29 --master 'local[2]'
+python batch/jobs/quality_checks.py   --lake $LAKE --dt 2026-11-25 --master 'local[2]'
+python batch/jobs/silver_to_gold.py   --lake $LAKE --dt 2026-11-25 --master 'local[2]'
+JAVA_HOME=/path/to/jdk17 python -m pytest batch/tests -q
 ```
 
-Output local:
+**Xong khi (PDF):** DAG tự chạy 3 đêm liên tiếp thành công, và có bảng số liệu tối ưu
+trước/sau. Số đo local đã có trong `docs/metrics/C-batch.md`; số trên cụm vẫn còn thiếu.
 
-- `data/batch/silver/trades.jsonl`
-- `data/batch/gold/daily_bars.csv`
-- `data/batch/gold/correlation_matrix.csv`
-- `data/batch/gold/ml_features.csv`
-- `data/batch/gold/yield_curve.csv`
+## 7. Đầu mối D: Hạ tầng, API, Dashboard, CI
 
-Chạy Spark thật:
-
-```bash
-spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 \
-  batch/jobs/bronze_to_silver.py \
-  --bronze s3a://lake/bronze \
-  --silver s3a://lake/silver/trades \
-  --minio-endpoint http://minio:9000 \
-  --access-key minioadmin --secret-key minioadmin
-
-spark-submit batch/jobs/silver_to_gold.py \
-  --silver s3a://lake/silver/trades \
-  --gold s3a://lake/gold \
-  --rates s3a://lake/bronze/rates.ticks \
-  --minio-endpoint http://minio:9000 \
-  --access-key minioadmin --secret-key minioadmin
-```
-
-Airflow:
-
-```bash
-export MARKET_PROJECT_DIR=/opt/app
-export MINIO_ENDPOINT=http://minio:9000
-export MINIO_ACCESS_KEY=minioadmin
-export MINIO_SECRET_KEY=minioadmin
-
-cp batch/dags/market_lakehouse_dag.py "$AIRFLOW_HOME/dags/"
-airflow dags list | grep market_lakehouse
-airflow dags trigger market_lakehouse_batch
-```
-
-### 6.4. Điều kiện hoàn thành
-
-- [ ] Silver dedupe theo `trade_id`; chạy lại không nhân đôi dữ liệu.
-- [ ] Gold có daily bars, correlation, yield curve, ML features.
-- [ ] Local batch chạy được không cần Spark.
-- [ ] `pytest batch/tests` pass, gồm test DAG import.
-- [ ] DAG đúng thứ tự: bronze -> silver -> gold -> KMeans -> quality.
-- [ ] README ghi rõ output và giới hạn.
-- [ ] Không hard-code credential; dùng env.
-
-### 6.5. Bàn giao
-
-- Cho D: đường dẫn gold, tên cột, tần suất cập nhật, metric/report cần hiển thị.
-- Cho nhóm: số liệu demo, cách chạy local, cách deploy DAG.
-- Cho A: xác nhận format bronze và sample rates.
-
-### 6.6. Rủi ro
-
-- Bronze format thay đổi làm silver fail.
-- ML features ít dòng; KMeans chỉ mang tính demo.
-- Airflow/Spark chưa chạy thật trên máy hiện tại; cần nêu rõ khi báo cáo.
-
-## 7. Đầu mối D - Hạ tầng, API, Dashboard, CI
-
-### 7.1. Phạm vi
-
-- Sở hữu `infra/`, `serving/`, `.github/workflows/`, tài liệu vận hành.
-- Compose dev/full, script init topic/Cassandra/MinIO.
-- K8s manifests cho Kafka, MinIO, Cassandra, Spark, Airflow, API, monitoring.
-- FastAPI đọc Cassandra, fallback demo khi Cassandra chưa sẵn sàng.
-- Prometheus/Grafana provisioning.
-- CI, smoke test, fault injection, runbook.
-
-### 7.2. File quan trọng
+**Một câu (PDF):** dựng "toà nhà" để code của mọi người chạy được, rồi đặt bảng điện tử ở
+sảnh cho giám khảo xem.
 
 | File | Vai trò |
 |---|---|
-| `infra/docker-compose.dev.yml` | Kafka + MinIO + Cassandra |
-| `infra/docker-compose.full.yml` | Full stack |
-| `infra/scripts/init-*.sh` | Tạo topic, keyspace, bucket |
-| `infra/k8s/*.yaml` | Manifests K8s + kustomization |
-| `serving/market_api.py` | FastAPI |
-| `serving/cassandra_repo.py` | Đọc Cassandra, retry/fallback |
-| `serving/demo_repo.py` | Dữ liệu demo |
-| `infra/monitoring/` | Prometheus + Grafana dashboards |
-| `.github/workflows/ci.yml` | CI |
-| `scripts/smoke_test.sh` | Smoke test API/Prometheus/Grafana |
-| `docs/runbook.md` | Vận hành và xử lý sự cố |
-
-### 7.3. Lệnh kiểm tra
-
-Validate cấu hình, không cần tải image:
+| `infra/docker-compose.dev.yml` | Kafka (`apache/kafka`, `localhost:9092`) + MinIO + Cassandra. Tự tạo bucket và schema |
+| `infra/k8s/` | Strimzi, MinIO, K8ssandra, Spark Operator, Airflow (KubernetesExecutor), kube-prometheus-stack, market-api |
+| `infra/scripts/` | `up.sh`, `down.sh`, `images.sh`, `secrets.sh`, `gen_kafka_topics.py`, `build_dashboards.py` |
+| `serving/` | market-api: `/api/v1/ohlcv`, `indicators/latest`, `alerts`, `daily`, `daily/compare`, `correlation`, `yield-curve`, `clusters`, `symbols` |
+| `infra/monitoring/` | Dashboard thị trường + dashboard giám sát |
+| `infra/fault_injection/k8s/` | 6 kịch bản thử lỗi |
+| `.github/` (gốc git) | CI (ruff + pytest + kubeconform), CODEOWNERS, mẫu PR |
 
 ```bash
-git checkout feature/D-infra
-docker compose -f infra/docker-compose.dev.yml config -q
-docker compose -f infra/docker-compose.full.yml config -q
-python -m pytest -q
+make dev-up && make topics          # máy yếu: Compose dev
+make images && make secrets         # build linux/arm64 + minikube image load; secret lấy từ .env
+make up                             # dựng toàn bộ trên minikube (~16 GB RAM)
+make port-forward                   # Grafana :3000, API :8000, Airflow :8080, Prometheus :9090
+REQUIRE_REAL_DATA=1 bash scripts/smoke_test.sh
+make down
 ```
 
-Parse K8s và dashboard:
+**Xong khi (PDF):** một máy sạch chạy `make up` là lên đủ hệ thống, và dashboard có số liệu.
 
-```bash
-python - <<'PY'
-import glob, json, yaml
-for p in glob.glob("infra/monitoring/grafana/dashboards/*.json"):
-    json.load(open(p))
-for p in glob.glob("infra/k8s/*.yaml"):
-    list(yaml.safe_load_all(open(p, encoding="utf-8")))
-print("OK")
-PY
-```
+Ngoài ra trên Kubernetes, market-api đặt `DEMO_FALLBACK=false`. Khi Cassandra không trả lời,
+API trả 503 thay vì âm thầm hiện dữ liệu giả.
 
-Chạy API local:
-
-```bash
-pip install -r serving/requirements.txt
-python -m uvicorn serving.market_api:app --port 8000
-curl localhost:8000/health
-curl "localhost:8000/api/v1/bars?symbol=BTCUSDT&limit=5"
-curl "localhost:8000/api/v1/alerts?symbol=BTCUSDT&limit=5"
-```
-
-Chạy dev stack (chỉ khi đủ tài nguyên):
-
-```bash
-cp infra/.env.example .env
-docker compose -f infra/docker-compose.dev.yml up -d
-bash infra/scripts/init-topics.sh
-bash infra/scripts/init-cassandra.sh
-bash infra/scripts/init-minio.sh
-```
-
-Build API và full stack:
-
-```bash
-docker build -f serving/Dockerfile -t btl/market-api .
-docker compose -f infra/docker-compose.full.yml up -d
-```
-
-K8s:
-
-```bash
-kubectl apply -k infra/k8s
-kubectl -n market get pods,svc
-kubectl -n market port-forward svc/grafana 3000:3000
-```
-
-Smoke test khi stack đã chạy:
-
-```bash
-bash scripts/smoke_test.sh
-```
-
-### 7.4. Điều kiện hoàn thành
-
-- [ ] Cả hai file Compose `config -q` pass.
-- [ ] K8s YAML parse pass; `kustomization.yaml` trỏ đúng file.
-- [ ] Grafana dashboards JSON hợp lệ; datasource/provisioning đúng.
-- [ ] API `/health`, `/api/v1/bars`, `/api/v1/alerts`, `/metrics` chạy được.
-- [ ] API fallback demo khi không có Cassandra và tự retry mỗi 5 giây.
-- [ ] CI chạy test/compile/demo/compose config.
-- [ ] Smoke test và fault injection có hướng dẫn.
-- [ ] Runbook, architecture, metrics, report outline đầy đủ.
-- [ ] Không đưa credential thật vào manifest/compose.
-
-### 7.5. Bàn giao
-
-- Cho nhóm: port, service name, env, lệnh chạy/kiểm tra.
-- Cho B: API đọc bảng/cột nào; nếu B đổi schema, báo D.
-- Cho C: dashboard/report cần gold data nào.
-- Cho A: service Kafka/MinIO dùng trong Compose/K8s.
-
-### 7.6. Rủi ro và giới hạn
-
-- Full stack cần khoảng 12-16 GB RAM và 12+ GB đĩa; máy hiện tại không đủ.
-- K8s manifests dùng single-node Kafka/Cassandra, chưa production-ready.
-- API chỉ đọc; không có ghi/streaming qua API.
-- Grafana bảng dùng Infinity plugin; nếu chạy ngoài Compose/K8s phải cài plugin.
-- API có thể trả danh sách rỗng trong một request đúng lúc Cassandra vừa mất kết nối;
-  request sau sẽ fallback demo hoặc kết nối lại.
-
-## 8. Luồng bàn giao và tích hợp
-
-### 8.1. Bàn giao theo cặp
+## 8. Bàn giao theo cặp
 
 | Từ | Đến | Artifact | Điều kiện |
 |---|---|---|---|
-| A | B | `contracts/topics.yaml`, schema, sample, key | Schema được review |
-| A | C | Format bronze, `trade_id`, sample rates | Sample parse được |
-| B | D | Bảng Cassandra, cột, alert format | `schema.cql` khớp sink |
-| C | D | Gold paths, cột, tần suất, số liệu demo | Local batch chạy được |
-| D | A/B/C | Port, env, service name, endpoint | Compose config pass |
-
-### 8.2. Thứ tự tích hợp khuyến nghị
-
-1. Chốt `contracts/` và sample.
-2. A dry-run/replay; đảm bảo producer không cần Kafka vẫn kiểm tra được.
-3. B test batch logic; chạy Spark nếu có môi trường.
-4. C chạy local batch; kiểm tra output gold.
-5. D chạy API local với demo fallback, validate Compose/K8s.
-6. Nếu đủ tài nguyên, chạy dev stack rồi full stack.
-7. Nếu cần gộp code, tạo `integration` từ `main`, merge 4 branch lớn vào đó;
-   **không merge vào `main`**.
-
-### 8.3. Kiểm tra tích hợp tối thiểu
-
-```bash
-# Trên từng branch lớn
-python -m pytest
-
-# Trên branch D
-docker compose -f infra/docker-compose.dev.yml config -q
-docker compose -f infra/docker-compose.full.yml config -q
-
-# Trên branch C
-python batch/run_local_batch.py
-
-# Trên branch D
-python -m uvicorn serving.market_api:app --port 8000
-curl localhost:8000/health
-```
+| A | B, C | 7 topic, schema, 20 mẫu/topic | `tests/test_contracts.py` xanh |
+| A | C | Bronze `s3a://lake/bronze/<topic>/dt=…/` | S3 sink chạy, có file trong MinIO |
+| B | D | `ohlcv_1m`, `ohlcv_5m`, `indicators_latest`, `alerts_by_day`, topic `alerts` | Test cột so với `cassandra.cql` xanh |
+| C | D | `daily_summary`, `correlation_matrix`, `yield_curve`, `asset_clusters` | Test cột so với `cassandra.cql` xanh |
+| D | A, B, C | Namespace, service, secret, image, cổng metrics (`contracts/infra.yaml`) | `make up` chạy được |
 
 ## 9. Checklist nghiệm thu toàn nhóm
 
-- [ ] `main` chỉ có phần nền, không có code A/B/C/D.
-- [ ] 4 branch lớn tồn tại và chứa đúng phạm vi.
-- [ ] Các branch con đã merge vào branch lớn, không merge vào `main`.
-- [ ] `contracts/` khớp với producer, streaming và Cassandra.
-- [ ] `make demo` và `make verify` pass.
-- [ ] `pytest` pass trên cả 4 branch lớn.
-- [ ] Compose dev/full `config -q` pass.
-- [ ] K8s YAML và Grafana JSON parse pass.
-- [ ] API health/bars/alerts/metrics chạy được với demo fallback.
-- [ ] README, runbook, architecture, metrics, report outline đầy đủ.
-- [ ] Không commit secret/dữ liệu runtime.
-- [ ] Báo cáo ghi rõ giới hạn: chưa chạy full stack, chưa test Spark/Cassandra thật.
+- [ ] `contracts/` trên `main` khớp producer, streaming, batch và market-api (test xanh trên 4 branch).
+- [ ] `make demo`, `make verify`, `make test` xanh trên `main`.
+- [ ] `python -m pytest -q` xanh trên cả 4 branch lớn (B, C chạy cùng Java 17).
+- [ ] `make up` trên máy sạch; dashboard thị trường và dashboard giám sát có số liệu.
+- [ ] 4 nguồn chạy 1 giờ; độ trễ nến dưới ~10 s; DAG chạy 3 đêm; 6 kịch bản thử lỗi đã ghi.
+- [ ] `docs/metrics.md` và `docs/lessons/` có số đo thật, ghi ngay khi đo.
+- [ ] CODEOWNERS đã điền username thật; bật bảo vệ nhánh trên GitHub.
+- [ ] Không commit secret hay dữ liệu runtime.
 
 ## 10. Xử lý sự cố nhanh
 
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
-| `ModuleNotFoundError` | Sai branch hoặc thiếu package | `git branch --show-current`; cài đúng requirements |
-| `pyspark`/Java lỗi | Máy chưa có Java/Spark | Dùng `make demo`, test logic; chạy Spark trên máy khác |
-| Producer dry-run lỗi | Thiếu sample/sai đường dẫn | Kiểm tra `contracts/samples/` |
-| Kafka không healthy | Volume KRaft cũ hoặc thiếu dung lượng | Xem log; `down -v` rồi start lại |
-| Cassandra chậm | Khởi động 60-90 giây | Chờ healthcheck; chạy `init-cassandra.sh` sau |
-| MinIO không tạo bucket | Sai network/credential | Kiểm tra `MINIO_NETWORK`, env |
-| API trả demo dù có Cassandra | Cassandra chưa sẵn sàng | Chờ 5 giây để API retry; kiểm tra `/health` |
-| Grafana không có bảng | Thiếu Infinity plugin | Dùng Compose/K8s có cài plugin hoặc cài thủ công |
-| Hết đĩa khi `docker compose up` | Image quá lớn | Chỉ chạy `config -q`; dọn image/volume |
-| Merge conflict | Branch con lệch branch lớn | Merge branch lớn vào branch con, resolve, test, merge lại |
+| `ensurepip is not available` | Ubuntu thiếu `python3-venv` | `sudo apt install python3-venv` hoặc `--without-pip` + `get-pip.py` |
+| `ModuleNotFoundError: distutils` khi gọi `toPandas()` | pyspark 3.5 chạy trên Python 3.12 | `pip install setuptools` (đã có trong `requirements.txt`) |
+| Test Spark bị skip | Thiếu Java | Đặt `JAVA_HOME` trỏ JDK 17 |
+| `tests/test_contracts.py` fail | Sửa `contracts/` mà không sửa `common/contracts.py` (hoặc ngược lại) | Sửa cả hai trong cùng một PR |
+| Kafka trong Compose không lên | Volume KRaft cũ | `make dev-down` (xoá volume) rồi `make dev-up` |
+| market-api trả 503 | Cassandra chưa sẵn sàng và `DEMO_FALLBACK=false` | Kiểm tra `/health`, pod Cassandra; ở local có thể đặt `DEMO_FALLBACK=true` |
+| Grafana không có bảng thị trường | Thiếu plugin Infinity | Values của kube-prometheus-stack đã cài plugin; chạy ngoài cụm thì cài tay |
+| Merge conflict | Branch con lệch branch lớn | Merge branch lớn vào branch con, giải quyết conflict, chạy test, rồi merge lại |
 
-## 11. Mẫu báo cáo tiến độ cho 4 đầu mối
-
-Gửi theo mẫu ngắn:
+## 11. Mẫu báo cáo tiến độ
 
 ```text
 Đầu mối: A/B/C/D
 Branch: feature/...
 Đã xong:
-- ...
 Đang làm:
-- ...
 Blocker:
-- ...
 Cần review từ:
-- ...
-Bằng chứng:
-- commit: ...
-- lệnh đã chạy: ...
-- kết quả test/demo: ...
+Bằng chứng: commit, lệnh đã chạy, kết quả test/demo, số đo (đã ghi vào docs/metrics...)
 ```
 
-## 12. Lịch gợi ý 3 giờ
+## 12. Kế hoạch 6 tuần (theo PDF, tính từ 09/11, xong hệ thống trước 20/12)
 
-| Thời gian | Việc cần làm |
-|---|---|
-| 0:00-0:20 | Cả nhóm chốt contract, checkout branch, chạy `make demo`/`make test` |
-| 0:20-1:30 | 4 đầu mối làm branch con; commit sớm, merge vào branch lớn |
-| 1:30-2:15 | Bàn giao A->B/C, B/C->D; D chạy API/demo, validate Compose/K8s |
-| 2:15-2:45 | Viết README/report, ghi số liệu demo, chụp màn hình nếu có |
-| 2:45-3:00 | Checklist nghiệm thu, `git log --graph`, chốt giới hạn và báo cáo |
+| Tuần | A | B | C | D | Mốc cả nhóm |
+|---|---|---|---|---|---|
+| 1 (09–15/11) | Schema + mẫu ✅; producer Binance gửi Kafka | Spark local đọc file mẫu ra nến 1 phút ✅ | Thiết kế bronze/silver/gold ✅ | Repo; Kafka + MinIO; Compose ✅ | Chốt `contracts/` ✅ |
+| 2 (16–22/11) | Producer cổ phiếu, vàng, Treasury chạy thật | Đọc Kafka thật, ghi Cassandra | bronze→silver trên MinIO | Cassandra + Spark Operator | 1 nguồn chạy hết luồng nhanh |
+| 3 (23–29/11) | Kafka Connect → MinIO; replay | VWAP, biến động, cảnh báo trên dữ liệu thật | gold: join đa tài sản, tương quan | Prometheus/Grafana, dashboard giám sát | Cả 2 luồng có dữ liệu |
+| 4 (30/11–06/12) | Chạy liên tục 24 giờ | Exactly-once, đo độ trễ | Airflow, MLlib | Dashboard thị trường | Ngừng thêm tính năng |
+| 5 (07–13/12) | Đo throughput | Thử xoá pod, dữ liệu đến muộn | Tối ưu trước/sau trên cụm | `make up`, thử lỗi | Bản nháp báo cáo |
+| 6 (14–20/12) | Slide + chương A | Slide + chương B | Slide + chương C | Ghép báo cáo, video demo | Tập thuyết trình 2 lần |
+
+Dấu ✅ nghĩa là đã có code và test; các việc "chạy thật" vẫn cần cụm.
 
 ## 13. Tài liệu tham chiếu
 
-- `README.md` - tổng quan và lệnh nhanh.
-- `docs/branching.md` - bản đồ branch và merge policy.
-- `ingest/README.md` - chi tiết vai A.
-- `streaming/README.md` - chi tiết vai B.
-- `batch/README.md`, `batch/airflow/README.md` - chi tiết vai C.
-- `infra/README.md`, `infra/k8s/README.md`, `serving/README.md` - chi tiết vai D.
-- `docs/architecture.md`, `docs/runbook.md`, `docs/metrics.md`,
-  `docs/report_outline.md` - tài liệu kiến trúc/vận hành/báo cáo.
+- `docs/thay-doi-theo-pdf.md`: toàn bộ thay đổi theo PDF, danh sách nhánh, lỗi đã sửa, việc còn lại.
+- `contracts/README.md`: hợp đồng v2.
+- `README.md`, `docs/branching.md`.
+- `ingest/README.md` (A), `streaming/README.md` (B), `batch/README.md` + `batch/airflow/README.md` (C).
+- `infra/README.md`, `infra/k8s/README.md`, `serving/README.md`, `docs/architecture.md`,
+  `docs/runbook.md`, `docs/metrics.md`, `docs/report_outline.md`, `docs/demo_script.md` (D).
