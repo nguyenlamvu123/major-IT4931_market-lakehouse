@@ -36,7 +36,11 @@ topics:
     schema: schemas/bar.schema.json
     producer: A
     sources: [alpaca, yahoo]
+    # Live: Alpaca 1Min bars for the stocks.trades symbols. Backfill: yfinance 1Day bars
+    # for every registry symbol (BTC via BTC-USD, DXY via DX-Y.NYB), so the batch layer
+    # has months of daily history for 90-day correlations before live data accumulates.
     symbols: [AAPL, MSFT, NVDA, SPY, GLD, TLT, IEF, SHY]
+    backfill_symbols: [BTCUSDT, ETHUSDT, AAPL, MSFT, NVDA, SPY, GLD, TLT, IEF, SHY, "GC=F", DXY]
   - name: gold.quotes
     partitions: 1
     retention_ms: 604800000
