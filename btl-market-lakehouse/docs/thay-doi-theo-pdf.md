@@ -109,6 +109,7 @@ Mỗi nhánh con được tạo từ nhánh đích, sau đó merge `--no-ff` tr�
 | `feature/common-infra-feedback-a` | `main` | Thêm metric `market_producer_duplicates_total`, 2 consumer group của S3 sink, DFII10 lấy từ CSV Treasury |
 | `feature/common-requirements-setuptools` | `main` | Thêm `setuptools`, vì pyspark 3.5 vẫn `import distutils` mà Python 3.12 đã bỏ |
 | `feature/docs-pdf-alignment` | `main` | File này và README |
+| `feature/instruction-v2` | `instruction` | Cập nhật `docs/huong-dan-4-dau-moi.md` theo hợp đồng v2: lệnh và file của từng vai, tiêu chí "xong khi" lấy từ PDF, kế hoạch 6 tuần thay cho "lịch 3 giờ", mỗi người dùng danh tính git của mình |
 | `feature/A-contracts-v2` | `feature/A-ingest` | Xoá các file hợp đồng v1 |
 | `feature/A-producers-v2` | `feature/A-ingest` | Producer theo v2: Alpaca và Finnhub chuyển sang WebSocket; Yahoo cho GC=F/DXY; FRED đủ 9 series; thêm producer CSV Treasury; luôn gắn `ingest_time` |
 | `feature/A-resilience` | `feature/A-ingest` | Backoff + jitter, circuit breaker, `dead-letter`, LRU chống trùng, metrics trên cổng 8001 |
