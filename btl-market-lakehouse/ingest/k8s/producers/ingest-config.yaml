@@ -1,0 +1,14 @@
+# Shared settings of every producer (contracts/infra.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingest-config
+  namespace: market
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: producer
+data:
+  KAFKA_BOOTSTRAP: market-kafka-bootstrap.kafka.svc:9092
+  KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+  MINIO_ENDPOINT: http://minio.minio.svc:9000
+  METRICS_PORT: '8001'

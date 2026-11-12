@@ -1,0 +1,82 @@
+# Alpaca IEX websocket -> stocks.trades + stocks.bars (AAPL MSFT NVDA SPY GLD TLT IEF SHY).
+# Needs ALPACA_API_KEY/ALPACA_SECRET_KEY in secret market-api-keys (make secrets);
+# without them the pod exits at start-up and stays in CrashLoopBackOff.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-alpaca
+  namespace: market
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: producer
+    app.kubernetes.io/name: producer-alpaca
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: producer-alpaca
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: btl-market-lakehouse
+        app.kubernetes.io/component: producer
+        app.kubernetes.io/name: producer-alpaca
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: producer
+        image: btl/ingest:dev
+        imagePullPolicy: IfNotPresent
+        args:
+        - --source
+        - alpaca
+        - --alpaca-mode
+        - ws
+        envFrom:
+        - configMapRef:
+            name: ingest-config
+        - secretRef:
+            name: market-api-keys
+            optional: true
+        env:
+        - name: PRODUCER_NAME
+          value: producer-alpaca
+        ports:
+        - name: metrics
+          containerPort: 8001
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 15
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          failureThreshold: 4
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}

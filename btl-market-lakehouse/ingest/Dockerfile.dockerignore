@@ -1,0 +1,16 @@
+# BuildKit reads <Dockerfile>.dockerignore next to the Dockerfile; the build context is
+# the project root (the image needs common/ and contracts/), so a plain ingest/.dockerignore
+# would never be applied.
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+.venv/
+venv/
+data/
+.env
+**/tests/
+batch/
+streaming/
+serving/
+infra/
+docs/

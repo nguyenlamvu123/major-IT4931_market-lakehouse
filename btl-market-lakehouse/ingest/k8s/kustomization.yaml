@@ -1,0 +1,7 @@
+# Everything role A deploys. Producers live in namespace market, Kafka Connect in kafka;
+# each resource sets its own namespace, so no namespace override here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - producers
+  - kafka-connect

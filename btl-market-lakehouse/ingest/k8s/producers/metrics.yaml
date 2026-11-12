@@ -1,0 +1,42 @@
+# Headless Service over all producer pods + ServiceMonitor picked up by
+# kube-prometheus-stack (label release=kube-prometheus-stack). Series:
+# market_producer_{messages,errors,reconnects,dead_letter,duplicates}_total.
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-metrics
+  namespace: market
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: producer
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: producer
+  ports:
+  - name: metrics
+    port: 8001
+    targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: producers
+  namespace: market
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: producer
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: btl-market-lakehouse
+      app.kubernetes.io/component: producer
+  namespaceSelector:
+    matchNames:
+    - market
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
