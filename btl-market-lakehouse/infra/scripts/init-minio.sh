@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
+# Create the contract buckets (lake, checkpoints). The compose service "minio-init" runs
+# the same commands on `docker compose up`; this re-runs it on demand.
 set -euo pipefail
 
-NETWORK="${MINIO_NETWORK:-btl-market-dev_market}"
-USER="${MINIO_ROOT_USER:-minioadmin}"
-PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "${HERE}/../.." && pwd)"
+COMPOSE_FILE="${COMPOSE_FILE:-${ROOT}/infra/docker-compose.dev.yml}"
 
-docker run --rm --network "${NETWORK}" --entrypoint /bin/sh minio/mc -c "
-  mc alias set local http://minio:9000 '${USER}' '${PASSWORD}' &&
-  mc mb --ignore-existing local/lake &&
-  mc mb --ignore-existing local/checkpoints &&
-  mc ls local
-"
+docker compose -f "${COMPOSE_FILE}" run --rm minio-init </dev/null
