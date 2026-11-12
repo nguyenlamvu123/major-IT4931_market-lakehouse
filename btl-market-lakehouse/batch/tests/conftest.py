@@ -86,3 +86,41 @@ def lake_dir(tmp_path: Path) -> Path:
 def bronze_writer():
     """Fixture form of :func:`write_bronze` (conftest modules are not importable)."""
     return write_bronze
+
+
+#: Size of the shared synthetic market used by gold, sink, ML and quality tests.
+SYNTHETIC_DAYS = 90
+
+
+@pytest.fixture(scope="session")
+def synthetic_market():
+    """(trades, yields) records of the deterministic market in common.contracts."""
+    from common.contracts import synthetic_trades, synthetic_yields
+
+    return (
+        synthetic_trades(rows=4_000, seed=42, days=SYNTHETIC_DAYS),
+        synthetic_yields(days=SYNTHETIC_DAYS, seed=42),
+    )
+
+
+@pytest.fixture(scope="session")
+def silver_lake(spark, tmp_path_factory, synthetic_market):
+    """A lake whose silver layer holds the whole synthetic market (built from bronze)."""
+    from datetime import timedelta
+
+    from batch.lake import Lake, day_range
+    from batch.silver import build_silver, write_silver
+    from common.contracts import INSTRUMENTS, SYNTHETIC_START, TRADE_TOPICS
+
+    trades, yields = synthetic_market
+    root = tmp_path_factory.mktemp("synthetic") / "lake"
+    for topic in TRADE_TOPICS:
+        write_bronze(root, topic, [r for r in trades if INSTRUMENTS[r["symbol"]].topic == topic])
+    write_bronze(root, "rates.yields", yields)
+    lake = Lake(root.as_uri())
+    first = SYNTHETIC_START.date()
+    tables, stats = build_silver(
+        spark, lake, day_range(first, first + timedelta(days=SYNTHETIC_DAYS - 1))
+    )
+    write_silver(spark, lake, tables, stats)
+    return lake
