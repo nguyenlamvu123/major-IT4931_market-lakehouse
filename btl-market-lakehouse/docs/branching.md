@@ -55,3 +55,16 @@ make test
   `integration` branch and merge there after review.
 - Contracts changes (`contracts/`) must be reviewed by at least one other role
   before merging into a role branch.
+
+## Contract v2 (2026-11-12)
+
+`contracts/` now lives on `main` (contract v2 from the PDF "Kiến trúc – Phân công"), so
+the four role branches read one copy. Shared changes flow one way only:
+
+```text
+main --merge--> feature/{A-ingest,B-streaming,C-batch,D-infra}
+```
+
+Role branches still never merge into `main`. The sub-branches created for the PDF
+alignment (one per task, merged `--no-ff` into their big branch) are listed with their
+content in `docs/thay-doi-theo-pdf.md`, section 3.
