@@ -15,12 +15,20 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
-from pyspark.sql import SparkSession
+if TYPE_CHECKING:  # keep this module importable without pyspark (pure quality rules)
+    from pyspark.sql import SparkSession
 
 DEFAULT_LAKE = "s3a://lake"
 
 SILVER_TABLES = ("trades", "bars", "yields", "alerts")
+
+#: FRED and the Treasury publish a day's yields on the next US business day, after the
+#: nightly run for that day has already happened, and FRED revises recent values. Every
+#: run therefore re-reads rates.yields for this many trailing days, so late or revised
+#: observations still reach silver, the gold yield curve and Cassandra.
+YIELD_LATENCY_DAYS = 7
 GOLD_TABLES = (
     "daily_summary",
     "correlation_matrix",

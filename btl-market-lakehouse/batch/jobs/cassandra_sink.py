@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +29,12 @@ sys.path.insert(0, str(ROOT))
 
 from batch.cassandra_sink import SINK_TABLES, CassandraSettings, prepare, write  # noqa: E402
 from batch.gold import read_gold  # noqa: E402
-from batch.lake import Lake, add_day_arguments, days_from_args  # noqa: E402
+from batch.lake import (  # noqa: E402
+    YIELD_LATENCY_DAYS,
+    Lake,
+    add_day_arguments,
+    days_from_args,
+)
 from batch.spark_session import build_spark  # noqa: E402
 
 
@@ -52,7 +58,11 @@ def main() -> None:
     )
     lake = Lake(args.lake)
     for table in tables:
-        frame = read_gold(spark, lake, table, days[0], days[-1])
+        first = days[0]
+        if table == "yield_curve":
+            # silver_to_gold rewrites the trailing yield days too; copy them as well.
+            first = first - timedelta(days=YIELD_LATENCY_DAYS)
+        frame = read_gold(spark, lake, table, first, days[-1])
         if args.dry_run:
             prepared = prepare(frame, table)
             print(f"[dry-run] {table}: {prepared.count()} rows -> {settings.keyspace}.{table}")

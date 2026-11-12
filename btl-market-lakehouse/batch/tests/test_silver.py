@@ -150,7 +150,7 @@ def test_missing_bronze_day_is_not_an_error(spark, bronze) -> None:
     from batch.lake import Lake
     from batch.silver import build_silver
 
-    tables, stats = build_silver(spark, Lake(bronze.as_uri()), [date(2026, 9, 6)])
+    tables, stats = build_silver(spark, Lake(bronze.as_uri()), [date(2026, 10, 20)])
     assert all(frame.count() == 0 for frame in tables.values())
     assert stats == []
 
@@ -163,3 +163,19 @@ def test_stats_are_json_serialisable(spark, bronze) -> None:
 
     _, stats = build_silver(spark, Lake(bronze.as_uri()), [DAY1])
     assert json.loads(json.dumps([asdict(item) for item in stats]))
+
+
+def test_late_alert_keeps_arrival_partition_and_alert_day(spark, lake_dir) -> None:
+    # The alerts sink partitions by Kafka record time: an alert for the 23:59 bar of DAY1
+    # can be emitted after midnight and land in DAY2's bronze partition.
+    from batch.lake import Lake
+    from batch.silver import build_silver
+
+    alert = make_alert("BTCUSDT", "2026-09-01T23:59:00+00:00", "PRICE_SPIKE", "high", 1.0, "x")
+    target = lake_dir / "bronze" / "alerts" / f"dt={DAY2}"
+    target.mkdir(parents=True)
+    (target / "alerts+0+0000000000.json").write_text(json.dumps(alert) + "\n")
+
+    tables, _ = build_silver(spark, Lake(lake_dir.as_uri()), [DAY2])
+    row = tables["alerts"].first()
+    assert (row["dt"], row["day"]) == (DAY2, DAY1)

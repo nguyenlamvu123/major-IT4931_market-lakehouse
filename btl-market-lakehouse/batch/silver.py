@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
@@ -34,7 +34,7 @@ from common.contracts import (
     TRADE_TOPICS,
 )
 
-from .lake import Lake, existing_paths
+from .lake import YIELD_LATENCY_DAYS, Lake, day_range, existing_paths
 from .schemas import ALERT_SCHEMA, BAR_SCHEMA, CORRUPT_COLUMN, RATE_SCHEMA, TRADE_SCHEMA
 
 TRADE_ASSET_CLASSES = [name for name in ASSET_CLASSES if name != "rates"]
@@ -261,11 +261,14 @@ def check_yields(raw: DataFrame) -> DataFrame:
 
 
 def check_alerts(raw: DataFrame) -> DataFrame:
-    alert_time = F.to_timestamp("alert_time")
+    # Alerts carry no event_time, so their S3 sink partitions by the Kafka record
+    # timestamp (when B emitted the alert). An alert for a 23:59 bar can land in the next
+    # day's bronze partition. Silver keeps that arrival partition as ``dt`` (re-running a
+    # day then rewrites exactly the alerts read for it) and ``day`` is the alert's date.
     checked = (
-        raw.withColumn("alert_time", alert_time)
-        .withColumn("dt", F.to_date(alert_time))
-        .withColumn("day", F.col("dt"))
+        raw.withColumn("alert_time", F.to_timestamp("alert_time"))
+        .withColumn("day", F.to_date("alert_time"))
+        .withColumn("dt", F.col("_bronze_dt"))
     )
     return checked.withColumn(
         "reject_reason",
@@ -276,7 +279,6 @@ def check_alerts(raw: DataFrame) -> DataFrame:
             (F.col("alert_time").isNull(), "bad_alert_time"),
             (_not_in("alert_type", list(ALERT_TYPES)), "bad_alert_type"),
             (_not_in("severity", list(SEVERITIES)), "bad_severity"),
-            (_dt_mismatch(), "dt_mismatch"),
         ),
     )
 
@@ -352,8 +354,9 @@ def build_silver(
     ).select(BARS_COLUMNS)
     stats.extend(_stats("stocks.bars", checked_bars, bars))
 
+    yield_days = day_range(days[0] - timedelta(days=YIELD_LATENCY_DAYS), days[-1])
     checked_yields = check_yields(
-        read_bronze(spark, lake, "rates.yields", days, RATE_SCHEMA)
+        read_bronze(spark, lake, "rates.yields", yield_days, RATE_SCHEMA)
     ).cache()
     # FRED revises recent observations; the most recently ingested value for a
     # (series, day) is the one to keep.
