@@ -85,3 +85,15 @@ def test_env_file_is_read_not_executed(tmp_path: Path) -> None:
     assert fred == f"$(touch {marker})"
     assert missing == ""
     assert not marker.exists()
+
+
+def test_secrets_reach_every_namespace_that_reads_minio() -> None:
+    secrets = (SCRIPTS / "secrets.sh").read_text(encoding="utf-8")
+    # kafka: role A's KafkaConnect S3 sink writes bronze objects to MinIO.
+    assert "for namespace in minio kafka spark airflow market; do" in secrets
+
+
+def test_up_waits_for_topics_before_role_workloads() -> None:
+    up = (SCRIPTS / "up.sh").read_text(encoding="utf-8")
+    # The S3 sink sends bad records to dead-letter; auto topic creation is off.
+    assert up.index("kafkatopic --all --for=condition=Ready") < up.index("apply_role_dir")

@@ -79,7 +79,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Kafka consumer lag (Kafka Connect → MinIO bronze)",
-      "description": "Lag tăng liên tục = Connect/MinIO không theo kịp (PDF D.5: Kafka có bị dồn tin không).",
+      "description": "Hai S3 sink: connect-s3-sink-bronze và connect-s3-sink-bronze-alerts. Lag tăng liên tục = Connect/MinIO không theo kịp (PDF D.5: Kafka có bị dồn tin không).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -97,7 +97,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)",
+          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{consumergroup=~\"connect-s3-sink-bronze.*\"})",
           "legendFormat": "{{consumergroup}} {{topic}}"
         }
       ],
@@ -181,8 +181,8 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Producer: lỗi, kết nối lại, dead-letter (15 phút)",
-      "description": "",
+      "title": "Producer: lỗi, kết nối lại, dead-letter, bản trùng bị bỏ (15 phút)",
+      "description": "Bản trùng = tin gửi lại khi kết nối lại, producer đã bỏ theo trade_id (slide Lessons learned 1/3: % trùng).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -220,6 +220,15 @@
           },
           "expr": "sum by (source) (increase(market_producer_dead_letter_total[15m]))",
           "legendFormat": "dead-letter {{source}}"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (source) (increase(market_producer_duplicates_total[15m]))",
+          "legendFormat": "trùng {{source}}"
         }
       ],
       "fieldConfig": {
