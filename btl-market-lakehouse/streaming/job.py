@@ -44,6 +44,12 @@ from pyspark.sql.streaming import StreamingQuery  # noqa: E402
 
 from common.contracts import TRADE_TOPICS  # noqa: E402
 from streaming.columns import OHLCV_COLUMNS  # noqa: E402
+from streaming.metrics import (  # noqa: E402
+    SpeedMetrics,
+    latency_seconds,
+    make_progress_listener,
+    serve,
+)
 from streaming.ohlcv import (  # noqa: E402
     aggregate_ohlcv,
     clean_trades,
@@ -114,6 +120,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--keyspace", default=os.getenv("CASSANDRA_KEYSPACE", "market"))
     parser.add_argument("--alert-topic", default="alerts")
     parser.add_argument("--disable-alert-kafka", action="store_true")
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=int(os.getenv("SPEED_METRICS_PORT", "9108")),
+        help="Prometheus /metrics port on the driver, 0 disables it",
+    )
     return parser.parse_args(argv)
 
 
@@ -193,11 +205,13 @@ class SpeedLayer:
         sink: Sink,
         alert_publisher: KafkaAlertPublisher | None = None,
         state: IndicatorState | None = None,
+        metrics: SpeedMetrics | None = None,
     ) -> None:
         self.spark = spark
         self.sink = sink
         self.alert_publisher = alert_publisher
         self.state = state or IndicatorState()
+        self.metrics = metrics
 
     def handler(self, query: BarQuery) -> Callable[[DataFrame, int], None]:
         def process(batch_df: DataFrame, batch_id: int) -> None:
@@ -212,10 +226,17 @@ class SpeedLayer:
         bars.persist()
         try:
             self.sink.write(query.table, bars)
-            pdf = _to_pandas_utc(bars) if query.derive_indicators else pd.DataFrame()
+            if query.derive_indicators:
+                pdf = _to_pandas_utc(bars)
+            elif self.metrics is not None:
+                pdf = _to_pandas_utc(bars.select("updated_at", "last_event_time"))
+            else:
+                pdf = pd.DataFrame()
         finally:
             bars.unpersist()
-        if pdf.empty:
+        if self.metrics is not None and not pdf.empty:
+            self.metrics.record_latency(query.name, latency_seconds(pdf))
+        if pdf.empty or not query.derive_indicators:
             return
         update = self.state.update(pdf, pd.Timestamp.now(tz="UTC"))
         if not update.indicators.empty:
@@ -278,7 +299,12 @@ def main(argv: list[str] | None = None) -> None:
         publisher = KafkaAlertPublisher(args.bootstrap, args.alert_topic)
     # Without Cassandra (parquet mode) there is nothing to restore state from.
     loader = CassandraBarLoader(spark, args.keyspace) if args.output_mode == "cassandra" else None
-    layer = SpeedLayer(spark, build_sink(args), publisher, IndicatorState(loader=loader))
+    metrics = None
+    if args.metrics_port:
+        metrics = SpeedMetrics()
+        serve(args.metrics_port)
+        spark.streams.addListener(make_progress_listener(metrics))
+    layer = SpeedLayer(spark, build_sink(args), publisher, IndicatorState(loader=loader), metrics)
     queries = start_queries(spark, args, layer)
     if args.available_now:
         for query in queries:
