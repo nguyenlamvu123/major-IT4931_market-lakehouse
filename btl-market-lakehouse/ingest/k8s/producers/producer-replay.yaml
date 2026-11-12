@@ -38,7 +38,7 @@ spec:
         - --source
         - replay
         - --speed
-        - '10'
+        - $(REPLAY_SPEED)
         - --rebase-time
         - --loop
         - --s3-uri
@@ -56,6 +56,10 @@ spec:
           value: producer-replay
         - name: REPLAY_S3_URI
           value: ''
+        # Read through $(REPLAY_SPEED) in args so `kubectl set env REPLAY_SPEED=100`
+        # (infra/fault_injection/k8s/flood_replay.sh, D) changes the speed on rollout.
+        - name: REPLAY_SPEED
+          value: '10'
         - name: MINIO_ACCESS_KEY
           valueFrom:
             secretKeyRef:
