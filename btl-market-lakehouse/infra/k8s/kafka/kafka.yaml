@@ -48,8 +48,9 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 3.7.1
-    metadataVersion: 3.7-IV4
+    # Must match role A's KafkaConnect CR (spec.version 3.9.0) and the compose image.
+    version: 3.9.0
+    metadataVersion: 3.9-IV0
     listeners:
       - name: plain
         port: 9092

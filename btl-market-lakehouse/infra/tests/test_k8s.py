@@ -142,3 +142,13 @@ def test_airflow_rbac_binds_worker_service_account() -> None:
     assert binding["subjects"] == [
         {"kind": "ServiceAccount", "name": "airflow-worker", "namespace": "airflow"}
     ]
+
+
+def test_kafka_version_is_the_same_on_compose_and_kubernetes() -> None:
+    (kafka,) = _by_kind("Kafka")
+    compose = yaml.safe_load((INFRA / "docker-compose.dev.yml").read_text(encoding="utf-8"))
+    assert compose["services"]["kafka"]["image"] == f"apache/kafka:{kafka['spec']['kafka']['version']}"
+    versions = (K8S / "helm" / "versions.env").read_text(encoding="utf-8")
+    # Strimzi 0.45 is the operator line that runs Kafka 3.9.0 (role A's KafkaConnect).
+    assert "STRIMZI_CHART_VERSION=0.45.0" in versions
+    assert kafka["spec"]["kafka"]["version"] == "3.9.0"

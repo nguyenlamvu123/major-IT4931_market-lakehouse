@@ -72,6 +72,9 @@ render_platform | kubectl apply -f -
 
 log "6/9 wait for Kafka, MinIO buckets, Cassandra schema"
 kubectl -n kafka wait kafka/market --for=condition=Ready --timeout=900s
+# Role A's S3 sink connector routes bad records to "dead-letter": every contract topic must
+# exist before step 9 applies the connector (auto topic creation is off).
+kubectl -n kafka wait kafkatopic --all --for=condition=Ready --timeout=300s
 kubectl -n minio wait job/minio-buckets --for=condition=complete --timeout=600s
 # cass-operator labels Cassandra pods with the cluster name; the schema Job itself waits
 # for CQL, so this only bounds how long we block.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # make secrets: create the Kubernetes Secrets of contracts/infra.yaml from .env.
 #
-#   minio-credentials  (MINIO_ACCESS_KEY, MINIO_SECRET_KEY) in ns minio, spark, airflow, market
+#   minio-credentials  (MINIO_ACCESS_KEY, MINIO_SECRET_KEY) in ns minio, kafka, spark, airflow, market
+#                      (kafka: role A's KafkaConnect S3 sink writes bronze to MinIO)
 #   market-api-keys    (ALPACA_API_KEY, ALPACA_SECRET_KEY, FINNHUB_API_KEY, FRED_API_KEY) in ns market
 #
 # Idempotent (create --dry-run | apply). Values never touch git: .env is gitignored.
@@ -20,7 +21,7 @@ if [[ -z "${access_key}" || -z "${secret_key}" ]]; then
   secret_key="${secret_key:-minioadmin}"
 fi
 
-for namespace in minio spark airflow market; do
+for namespace in minio kafka spark airflow market; do
   kubectl create namespace "${namespace}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl -n "${namespace}" create secret generic minio-credentials \
     --from-literal=MINIO_ACCESS_KEY="${access_key}" \

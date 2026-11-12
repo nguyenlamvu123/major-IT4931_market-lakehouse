@@ -46,7 +46,7 @@ def test_no_bitnami_images() -> None:
 
 def test_kafka_has_host_and_internal_listeners() -> None:
     kafka = _compose("docker-compose.dev.yml")["services"]["kafka"]
-    assert kafka["image"].startswith("apache/kafka:3.7")
+    assert kafka["image"] == "apache/kafka:3.9.0"
     advertised = kafka["environment"]["KAFKA_ADVERTISED_LISTENERS"]
     assert "localhost:9092" in advertised
     assert "kafka:29092" in advertised

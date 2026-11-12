@@ -14,7 +14,8 @@ make down      # gỡ toàn bộ
 ## Thứ tự dựng (`infra/scripts/up.sh`)
 
 1. `minikube start --cpus 6 --memory 16g`
-2. Helm (phiên bản chốt trong `helm/versions.env`):
+2. Helm (phiên bản chốt trong `helm/versions.env`; Strimzi 0.45 với Kafka 3.9.0, cùng
+   version với compose và với KafkaConnect của A):
    - cert-manager
    - strimzi-kafka-operator (ns `kafka`)
    - k8ssandra-operator (ns `cassandra`, cluster-scoped)
@@ -25,8 +26,8 @@ make down      # gỡ toàn bộ
    để tạo các CR (Kafka, KafkaTopic, K8ssandraCluster), MinIO, các Job khởi tạo,
    market-api, monitor và ConfigMap dashboard.
 5. Helm Airflow (ns `airflow`) chạy sau, khi Postgres trong `airflow/postgres.yaml` đã lên.
-6. Chờ các CR Ready: `kafka/market`, `k8ssandracluster/market`, job `minio-buckets`,
-   job `cassandra-schema`.
+6. Chờ các CR Ready: `kafka/market`, toàn bộ `kafkatopic`, Cassandra, job `minio-buckets`,
+   job `cassandra-schema`. Topic `dead-letter` phải có trước khi apply connector của A.
 
 ## Bố cục
 
@@ -54,7 +55,7 @@ make down      # gỡ toàn bộ
 - Để Prometheus thu metrics, pod producer/streaming cần label `btl.market/metrics: "true"`
   và một container port tên `metrics` (producer 8001, driver streaming 9108).
 - Secret `minio-credentials` (key `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`) có sẵn ở các
-  ns `minio`, `spark`, `airflow`, `market`. Secret `market-api-keys` có ở ns `market`.
+  ns `minio`, `kafka` (S3 sink của KafkaConnect), `spark`, `airflow`, `market`. Secret `market-api-keys` có ở ns `market`.
 
 ## Kiểm tra không cần cụm
 

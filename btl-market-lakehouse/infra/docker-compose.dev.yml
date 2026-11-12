@@ -20,7 +20,8 @@ services:
     # receiving updates and may disappear. The Apache project image is official, multi-arch
     # (linux/arm64 for the Mac M1 host) and configured via KAFKA_* environment variables.
     # Removal condition: none, this is the supported image.
-    image: apache/kafka:3.7.1
+    # Same Kafka version as the Strimzi cluster on Kubernetes (infra/k8s/kafka/kafka.yaml).
+    image: apache/kafka:3.9.0
     container_name: btl-kafka
     ports:
       - "9092:9092"
