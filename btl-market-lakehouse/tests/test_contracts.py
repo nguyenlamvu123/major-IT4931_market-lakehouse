@@ -111,3 +111,8 @@ def test_alert_sample_columns_fit_alerts_by_day() -> None:
     path = CONTRACTS / "samples" / "alerts.jsonl"
     row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert set(row) <= set(tables["alerts_by_day"].columns)
+
+
+def test_backfill_symbols_cover_registry() -> None:
+    bars = next(topic for topic in _topics_yaml()["topics"] if topic["name"] == "stocks.bars")
+    assert set(bars["backfill_symbols"]) == set(INSTRUMENTS)
