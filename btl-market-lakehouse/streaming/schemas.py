@@ -1,8 +1,9 @@
-"""Spark schemas for Kafka trade events, OHLCV bars and alerts."""
+"""Spark schemas for contract v2 trade events and the frames built from pandas."""
 
 from __future__ import annotations
 
 from pyspark.sql.types import (
+    DateType,
     DoubleType,
     LongType,
     StringType,
@@ -11,6 +12,10 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
+from .columns import ALERT_COLUMNS, INDICATOR_COLUMNS
+
+#: ``contracts/schemas/trade.schema.json`` (crypto.trades, stocks.trades, gold.quotes,
+#: fx.dxy). Unknown extra fields such as ``metadata`` are ignored by ``from_json``.
 TRADE_SCHEMA = StructType(
     [
         StructField("trade_id", StringType(), True),
@@ -21,45 +26,29 @@ TRADE_SCHEMA = StructType(
         StructField("volume", DoubleType(), True),
         StructField("source", StringType(), True),
         StructField("ingest_time", LongType(), True),
+        StructField("exchange_trade_id", StringType(), True),
     ]
 )
 
-BAR_SCHEMA = StructType(
-    [
-        StructField("symbol", StringType(), False),
-        StructField("window_start", TimestampType(), False),
-        StructField("open", DoubleType(), True),
-        StructField("high", DoubleType(), True),
-        StructField("low", DoubleType(), True),
-        StructField("close", DoubleType(), True),
-        StructField("volume", DoubleType(), True),
-        StructField("vwap", DoubleType(), True),
-        StructField("trade_count", LongType(), True),
-        StructField("sma_5", DoubleType(), True),
-        StructField("sma_15", DoubleType(), True),
-        StructField("ema_12", DoubleType(), True),
-        StructField("ema_26", DoubleType(), True),
-        StructField("macd", DoubleType(), True),
-        StructField("macd_signal", DoubleType(), True),
-        StructField("macd_hist", DoubleType(), True),
-        StructField("rsi_14", DoubleType(), True),
-        StructField("return_1m", DoubleType(), True),
-        StructField("volatility_30m", DoubleType(), True),
-        StructField("zscore_30m", DoubleType(), True),
-        StructField("volume_zscore_30m", DoubleType(), True),
-    ]
-)
+_TYPES = {
+    "day": DateType(),
+    "alert_time": TimestampType(),
+    "window_start": TimestampType(),
+    "updated_at": TimestampType(),
+    "symbol": StringType(),
+    "alert_id": StringType(),
+    "asset_class": StringType(),
+    "alert_type": StringType(),
+    "severity": StringType(),
+    "message": StringType(),
+}
 
+# Frames computed on the driver with pandas (indicators, alerts) are converted back to
+# Spark with an explicit schema: inferring it from a batch where a column is all-null
+# would produce NullType, which the Cassandra connector cannot write.
+INDICATOR_SCHEMA = StructType(
+    [StructField(name, _TYPES.get(name, DoubleType()), True) for name in INDICATOR_COLUMNS]
+)
 ALERT_SCHEMA = StructType(
-    [
-        StructField("alert_id", StringType(), False),
-        StructField("symbol", StringType(), False),
-        StructField("alert_time", TimestampType(), False),
-        StructField("alert_type", StringType(), False),
-        StructField("severity", StringType(), False),
-        StructField("price", DoubleType(), True),
-        StructField("zscore", DoubleType(), True),
-        StructField("volume_zscore", DoubleType(), True),
-        StructField("message", StringType(), True),
-    ]
+    [StructField(name, _TYPES.get(name, DoubleType()), True) for name in ALERT_COLUMNS]
 )
