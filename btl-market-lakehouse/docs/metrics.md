@@ -15,7 +15,7 @@ replay…) và **kết quả**. Số liệu chi tiết của từng vai có th�
 | B | Độ trễ end-to-end | từ `event_time` đến khi ghi `ohlcv_1m` (`updated_at - last_event_time`) | dưới ~10 s | Panel "Độ trễ giao dịch → Cassandra" |
 | B | Exactly-once | số dòng trùng sau khi xoá driver giữa chừng | 0 | Kịch bản thử lỗi #2 + công cụ đếm của B |
 | B | Tốc độ xử lý | dòng xử lý/giây, thời gian micro-batch | Xử lý ≥ dòng vào | `market_speed_*` |
-| C | Tối ưu hiệu năng | thời gian job trước/sau: số partition, broadcast join, cache, AQE | Bảng trước/sau | `docs/metrics/C.md` trên nhánh C |
+| C | Tối ưu hiệu năng | thời gian job trước/sau: số partition, broadcast join, cache, AQE | Bảng trước/sau | `docs/metrics/C-batch.md` trên nhánh C |
 | C | DAG ổn định | 3 đêm liên tiếp chạy thành công | 3/3 | Giao diện Airflow |
 | D | Dựng cụm | `make up` trên máy sạch | Thành công, ghi thời gian | Log của `make up` |
 | D | Thử lỗi | thời gian phát hiện/phục hồi, message mất/trùng | Ghi đủ 6 kịch bản | `docs/lessons/D-fault-injection.md` |
@@ -28,19 +28,21 @@ replay…) và **kết quả**. Số liệu chi tiết của từng vai có th�
 
 | Ngày | Cấu hình | Kết quả |
 |---|---|---|
-| _chưa đo trên cụm_ | | |
+| 2026-11-12 | Laptop, không Kafka (`ingest/tools/bench_publish.py`) | Đường publish (validate + định tuyến + chống trùng) ≈ 204 nghìn bản ghi/s; chi tiết ở `docs/metrics/A-ingest.md` trên nhánh A |
+| _chưa đo trên cụm_ | 4 nguồn chạy 1 giờ trên minikube | tin nhắn/giây mỗi topic (`ingest/tools/topic_rates.py`), % trùng/muộn (`feed_quality.py`) |
 
 ### B: Speed layer
 
 | Ngày | Cấu hình | Kết quả |
 |---|---|---|
-| _chưa đo trên cụm_ | | |
+| 2026-11-12 | Spark local[2], nguồn file, trigger 5 s (`streaming/tools/local_latency_run.py`) | Độ trễ giao dịch → nến 1m: p50 0,48 s, p95 2,10 s; xấu nhất ước tính ≈ 9,3 s; ~940 dòng/s; chi tiết ở `docs/metrics/B-speed.md` trên nhánh B |
+| _chưa đo trên cụm_ | Kafka + Cassandra trên minikube | độ trễ `updated_at - last_event_time`, số dòng trùng sau khi xoá driver |
 
 ### C: Batch layer
 
 | Ngày | Cấu hình | Kết quả |
 |---|---|---|
-| _xem `docs/metrics/C.md` trên nhánh C_ | | |
+| 2026-11-12 | Spark local[2], dữ liệu giả lập (`batch/jobs/benchmark.py`) | Partition pruning ×2,44; shuffle 200→8 ×5,60; AQE ×2,09; broadcast ×1,04; cache ×1,83; bảng đầy đủ ở `docs/metrics/C-batch.md` trên nhánh C |
 
 ### D: Hạ tầng và dashboard
 
