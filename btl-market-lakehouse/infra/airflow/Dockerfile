@@ -10,7 +10,10 @@
 # this image).
 FROM apache/airflow:2.9.3-python3.11
 
+# The DAG lives in /opt/airflow/dags, so its default template path (dags/../k8s) does
+# not exist in this image: point it at the SparkApplication templates copied below.
 ENV MARKET_PROJECT_DIR=/opt/app \
+    MARKET_BATCH_K8S_DIR=/opt/app/batch/k8s \
     PYTHONPATH=/opt/app
 
 # DAG files go to the scheduler's DAG folder; the whole batch package (SparkApplication
