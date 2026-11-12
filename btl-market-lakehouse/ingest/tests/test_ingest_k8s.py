@@ -47,8 +47,17 @@ def test_workloads_use_contract_image_namespace_and_bootstrap() -> None:
         assert {"configMapRef": {"name": "ingest-config"}} in refs
         assert {"secretRef": {"name": "market-api-keys", "optional": True}} in refs
         assert container["ports"][0]["containerPort"] == 8001
-        # $(VAR) is expanded by Kubernetes from the container env; an empty value is fine.
-        args = [re.sub(r"\$\([A-Z_]+\)", "", arg) for arg in container["args"]]
+        # Kubernetes expands $(VAR) from the container's literal env values; variables
+        # coming from secrets/configMaps (or unset) are left empty here, which is fine.
+        literal_env = {
+            item["name"]: str(item.get("value", ""))
+            for item in container.get("env", [])
+            if "value" in item
+        }
+        args = [
+            re.sub(r"\$\(([A-Z_]+)\)", lambda m, env=literal_env: env.get(m.group(1), ""), arg)
+            for arg in container["args"]
+        ]
         parsed = parse_args(args)
         assert parsed.source in SOURCES
         sources.add(parsed.source)
