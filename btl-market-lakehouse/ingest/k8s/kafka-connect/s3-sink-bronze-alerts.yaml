@@ -1,0 +1,42 @@
+# Generated from ingest/kafka_connect/s3-sink-alerts.json (store.url points at the in-cluster
+# MinIO); ingest/tests/test_ingest_kafka_connect.py keeps both in sync.
+# alerts has no event_time field (alert_time is ISO text), so it is partitioned by the
+# Kafka record timestamp, i.e. when the speed layer wrote the alert.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: s3-sink-bronze-alerts
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: market-connect
+spec:
+  class: io.confluent.connect.s3.S3SinkConnector
+  tasksMax: 1
+  config:
+    topics: alerts
+    s3.bucket.name: lake
+    s3.region: us-east-1
+    store.url: http://minio.minio.svc:9000
+    s3.path.style.access.enabled: 'true'
+    topics.dir: bronze
+    storage.class: io.confluent.connect.s3.storage.S3Storage
+    format.class: io.confluent.connect.s3.format.json.JsonFormat
+    partitioner.class: io.confluent.connect.storage.partitioner.TimeBasedPartitioner
+    path.format: '''dt''=YYYY-MM-dd'
+    partition.duration.ms: '86400000'
+    locale: en-US
+    timezone: UTC
+    flush.size: '1000'
+    rotate.interval.ms: '60000'
+    rotate.schedule.interval.ms: '300000'
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: 'false'
+    behavior.on.null.values: ignore
+    errors.tolerance: all
+    errors.log.enable: 'true'
+    errors.log.include.messages: 'true'
+    errors.deadletterqueue.topic.name: dead-letter
+    errors.deadletterqueue.topic.replication.factor: '1'
+    errors.deadletterqueue.context.headers.enable: 'true'
+    timestamp.extractor: Record
