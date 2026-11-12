@@ -1,0 +1,22 @@
+# CODEOWNERS (PDF mục 7.1, bước 3). GitHub only reads this file from the repository
+# root, .github/ or docs/; the project lives one level down in btl-market-lakehouse/.
+#
+# TODO: replace the placeholders with real GitHub usernames before enabling
+# "Require review from Code Owners". The placeholders use "_", which GitHub usernames
+# cannot contain, so they can never request a review from a stranger by accident.
+#   @ban_A = A Thu thập dữ liệu & Kafka
+#   @ban_B = B Speed layer
+#   @ban_C = C Batch layer & Data Lake
+#   @ban_D = D Hạ tầng & Dashboard (nhóm trưởng)
+
+/btl-market-lakehouse/ingest/       @ban_A
+/btl-market-lakehouse/streaming/    @ban_B
+/btl-market-lakehouse/batch/        @ban_C
+/btl-market-lakehouse/infra/        @ban_D
+/btl-market-lakehouse/serving/      @ban_D
+/btl-market-lakehouse/docs/         @ban_D
+/.github/                           @ban_D
+
+# Changing the contract or the shared base affects every role: everyone must know.
+/btl-market-lakehouse/contracts/    @ban_A @ban_B @ban_C @ban_D
+/btl-market-lakehouse/common/       @ban_A @ban_B @ban_C @ban_D
