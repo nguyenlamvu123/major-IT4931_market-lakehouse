@@ -1,0 +1,56 @@
+# SparkApplication for batch/jobs/quality_checks.py, rendered by Airflow (SparkKubernetesOperator).
+# Jinja: {{ ds }} = processed UTC day, {{ ds_nodash }} keeps the object name unique per run.
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: batch-quality-checks-{{ ds_nodash }}
+  namespace: spark
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: batch
+    btl/owner: C
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: btl/batch:dev
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: local:///opt/app/batch/jobs/quality_checks.py
+  arguments: ["--lake", "s3a://lake", "--dt", "{{ ds }}"]
+  sparkVersion: "3.5.3"
+  timeToLiveSeconds: 86400
+  # A failed rule is deterministic: retrying would fail the same way, so only submission
+  # failures (API server hiccups) are retried. Airflow then marks the run failed.
+  restartPolicy:
+    type: Never
+  sparkConf:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.shuffle.partitions: "8"
+    spark.ui.showConsoleProgress: "false"
+  driver:
+    cores: 1
+    coreLimit: 1000m
+    memory: 1g
+    serviceAccount: spark-operator-spark
+    labels:
+      version: 3.5.3
+    env:
+      - name: MINIO_ENDPOINT
+        value: http://minio.minio.svc:9000
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_ACCESS_KEY
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_SECRET_KEY
+  executor:
+    instances: 2
+    cores: 1
+    coreLimit: 1000m
+    memory: 1g
+    labels:
+      version: 3.5.3

@@ -1,0 +1,78 @@
+# SparkApplication for batch/jobs/cassandra_sink.py, rendered by Airflow (SparkKubernetesOperator).
+# Jinja: {{ ds }} = processed UTC day, {{ ds_nodash }} keeps the object name unique per run.
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: batch-cassandra-sink-{{ ds_nodash }}
+  namespace: spark
+  labels:
+    app.kubernetes.io/part-of: btl-market-lakehouse
+    app.kubernetes.io/component: batch
+    btl/owner: C
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: btl/batch:dev
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: local:///opt/app/batch/jobs/cassandra_sink.py
+  arguments: ["--lake", "s3a://lake", "--dt", "{{ ds }}"]
+  sparkVersion: "3.5.3"
+  timeToLiveSeconds: 86400
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 2
+    onFailureRetryInterval: 60
+    onSubmissionFailureRetries: 3
+    onSubmissionFailureRetryInterval: 30
+  sparkConf:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.shuffle.partitions: "8"
+    spark.ui.showConsoleProgress: "false"
+  driver:
+    cores: 1
+    coreLimit: 1000m
+    memory: 1g
+    serviceAccount: spark-operator-spark
+    labels:
+      version: 3.5.3
+    env:
+      - name: MINIO_ENDPOINT
+        value: http://minio.minio.svc:9000
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_ACCESS_KEY
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-credentials
+            key: MINIO_SECRET_KEY
+      - name: CASSANDRA_HOSTS
+        value: market-dc1-service.cassandra.svc
+      - name: CASSANDRA_PORT
+        value: "9042"
+      - name: CASSANDRA_KEYSPACE
+        value: market
+      # K8ssandra enables auth: copy its "market-superuser" secret into namespace spark
+      # as "cassandra-credentials" (keys username/password). Optional for the dev node.
+      - name: CASSANDRA_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: cassandra-credentials
+            key: username
+            optional: true
+      - name: CASSANDRA_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: cassandra-credentials
+            key: password
+            optional: true
+  executor:
+    instances: 2
+    cores: 1
+    coreLimit: 1000m
+    memory: 1g
+    labels:
+      version: 3.5.3
