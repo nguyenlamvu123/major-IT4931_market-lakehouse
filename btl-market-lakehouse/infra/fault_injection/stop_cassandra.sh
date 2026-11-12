@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
+# Compose: dừng cassandra. Khôi phục bằng restore.sh. Bản K8s nằm trong k8s/.
 set -euo pipefail
-COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.full.yml}"
-docker compose -f "$COMPOSE_FILE" stop cassandra
-echo "Cassandra stopped. Restart market-api to force demo fallback if needed."
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+COMPOSE_FILE="${COMPOSE_FILE:-${ROOT}/infra/docker-compose.full.yml}"
+docker compose -f "${COMPOSE_FILE}" stop cassandra
+echo "cassandra stopped at $(date -u +%Y-%m-%dT%H:%M:%SZ); record detection/recovery in docs/lessons/D-fault-injection.md"
