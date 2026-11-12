@@ -1,0 +1,26 @@
+# kubeflow/spark-operator 2.x, release "spark-operator" in ns spark.
+# SparkApplications of B (speed layer) and C (batch) run in ns spark with the job
+# ServiceAccount "spark-operator-spark" created by this chart (contracts/infra.yaml).
+spark:
+  jobNamespaces:
+    - spark
+  serviceAccount:
+    create: true
+    name: spark-operator-spark
+  rbac:
+    create: true
+webhook:
+  # The webhook mounts Secrets/ConfigMaps and env into driver/executor pods.
+  enable: true
+controller:
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+prometheus:
+  metrics:
+    enable: true
+  podMonitor:
+    create: true

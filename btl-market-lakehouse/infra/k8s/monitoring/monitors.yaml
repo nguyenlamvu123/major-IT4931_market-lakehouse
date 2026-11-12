@@ -1,0 +1,70 @@
+# Scrape targets for kube-prometheus-stack (helm/kube-prometheus-stack-values.yaml sets
+# the *SelectorNilUsesHelmValues flags to false, so these objects are picked up without a
+# release label). Metric names: contracts/infra.yaml "metrics".
+#
+# Scrape convention for A (producers) and B (streaming driver) pods:
+#   label  btl.market/metrics: "true"   and a container port named "metrics"
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: market-api
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [market]
+  selector:
+    matchLabels:
+      app: market-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: market-workloads
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [market, spark]
+  selector:
+    matchLabels:
+      btl.market/metrics: "true"
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+---
+# Strimzi kafkaExporter -> kafka_consumergroup_lag, kafka_topic_partition_current_offset.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-exporter
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [kafka]
+  selector:
+    matchLabels:
+      strimzi.io/name: market-kafka-exporter
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [minio]
+  selector:
+    matchLabels:
+      app: minio
+  endpoints:
+    - port: api
+      path: /minio/v2/metrics/cluster
+      interval: 30s

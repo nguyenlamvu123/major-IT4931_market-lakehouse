@@ -1,0 +1,29 @@
+# Lets Airflow task pods (KubernetesExecutor, ServiceAccount airflow-worker in ns airflow)
+# submit and watch SparkApplications in ns spark through SparkKubernetesOperator.
+# Without this the nightly DAG fails with 403 on sparkapplications.sparkoperator.k8s.io.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-spark-submitter
+  namespace: spark
+rules:
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications", "sparkapplications/status"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-spark-submitter
+  namespace: spark
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: airflow-spark-submitter
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: airflow

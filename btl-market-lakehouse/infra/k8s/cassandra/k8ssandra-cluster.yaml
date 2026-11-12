@@ -1,0 +1,36 @@
+# K8ssandra cluster "market", datacenter dc1, namespace cassandra (PDF: K8ssandra operator).
+# CQL endpoint for every client: market-dc1-service.cassandra.svc:9042 (contracts/infra.yaml).
+#
+# Dev sizing: 1 node, small heap, so it fits next to Kafka/Spark in a 16 GB minikube.
+# auth: false -> no superuser secret to distribute in dev. Turn it on (and give B/C/D the
+# generated market-superuser Secret) before exposing the cluster outside minikube.
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: market
+  namespace: cassandra
+spec:
+  auth: false
+  cassandra:
+    serverVersion: "4.1.5"
+    datacenters:
+      - metadata:
+          name: dc1
+        size: 1
+        storageConfig:
+          cassandraDataVolumeClaimSpec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+        config:
+          jvmOptions:
+            heapSize: 768M
+        resources:
+          requests:
+            memory: 1536Mi
+            cpu: 500m
+          limits:
+            memory: 2Gi
+            cpu: "2"

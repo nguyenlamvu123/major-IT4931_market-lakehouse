@@ -1,0 +1,68 @@
+# Template SparkApplication for roles B and C (PDF hạ tầng contract: "mẫu file
+# SparkApplication"). Copy it to streaming/k8s/ or batch/k8s/ and change the marked fields.
+# It is NOT part of kustomization.yaml: D only owns the template, B and C own their jobs.
+#
+# Conventions fixed by contracts/infra.yaml:
+# - namespace spark, serviceAccount spark-operator-spark (created by the spark-operator chart)
+# - image btl/<role>:dev with IfNotPresent (images are loaded into minikube, not pulled)
+# - MinIO credentials from Secret minio-credentials (created in ns spark by `make secrets`)
+# - Prometheus scrapes pods labelled btl.market/metrics=true on the port named "metrics"
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: example-job                       # CHANGE: e.g. speed-layer, bronze-to-silver
+  namespace: spark
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: btl/streaming:dev                # CHANGE: btl/streaming:dev (B) or btl/batch:dev (C)
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: local:///opt/app/streaming/job.py   # CHANGE
+  arguments: []                           # CHANGE: job CLI args, e.g. ["--dt", "{{ ds }}"] in Airflow templates
+  sparkVersion: "3.5.3"
+  # Streaming jobs: Always (restart from the MinIO checkpoint after a crash).
+  # Batch jobs: OnFailure with a small retry budget; Airflow retries on top of that.
+  restartPolicy:
+    type: Always
+    onFailureRetryInterval: 10
+    onSubmissionFailureRetryInterval: 20
+  sparkConf:
+    spark.hadoop.fs.s3a.endpoint: http://minio.minio.svc:9000
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    # S3A reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from the environment (below).
+    spark.hadoop.fs.s3a.aws.credentials.provider: com.amazonaws.auth.EnvironmentVariableCredentialsProvider
+    spark.cassandra.connection.host: market-dc1-service.cassandra.svc
+    spark.cassandra.connection.port: "9042"
+    spark.sql.session.timeZone: UTC
+    spark.ui.prometheus.enabled: "true"
+  driver:
+    cores: 1
+    memory: 1g
+    serviceAccount: spark-operator-spark
+    labels:
+      btl.market/metrics: "true"
+    env: &spark-env
+      - name: KAFKA_BOOTSTRAP
+        value: market-kafka-bootstrap.kafka.svc:9092
+      - name: MINIO_ENDPOINT
+        value: http://minio.minio.svc:9000
+      - name: CASSANDRA_HOSTS
+        value: market-dc1-service.cassandra.svc
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {name: minio-credentials, key: MINIO_ACCESS_KEY}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {name: minio-credentials, key: MINIO_SECRET_KEY}
+    ports:
+      - name: metrics
+        protocol: TCP
+        containerPort: 9108
+  executor:
+    instances: 1
+    cores: 1
+    memory: 1g
+    env: *spark-env

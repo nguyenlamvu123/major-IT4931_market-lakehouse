@@ -81,10 +81,6 @@ def test_no_copied_cql_or_topic_lists_in_infra() -> None:
     for path in INFRA.rglob("*"):
         if path.is_dir() or path.suffix not in {".yml", ".yaml", ".sh", ".cql"}:
             continue
-        # The legacy plain manifests in infra/k8s are replaced by operator CRs in the next
-        # change (feature/D-k8s-operators), which also drops this exclusion.
-        if "k8s" in path.relative_to(INFRA).parts:
-            continue
         text = path.read_text(encoding="utf-8")
         assert "CREATE TABLE" not in text, path
         assert "equity.trades" not in text, path

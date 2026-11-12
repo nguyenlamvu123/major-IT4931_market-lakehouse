@@ -1,0 +1,43 @@
+# Namespaces from contracts/infra.yaml. Helm releases are installed into the same names by
+# infra/scripts/up.sh (--create-namespace is idempotent with these objects).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cassandra
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airflow
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: market
+  labels: {app.kubernetes.io/part-of: btl-market-lakehouse}

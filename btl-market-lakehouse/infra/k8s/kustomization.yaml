@@ -1,30 +1,45 @@
+# Custom resources and plain manifests applied after the Helm operators are installed
+# (infra/scripts/up.sh). Build with:
+#
+#   kustomize build --load-restrictor LoadRestrictionsNone infra/k8s | kubectl apply -f -
+#
+# NOTICE:
+# --load-restrictor LoadRestrictionsNone is required because two generators read files
+# outside this directory on purpose: contracts/cassandra.cql (single source of the schema)
+# and infra/monitoring/grafana/dashboards/*.json (shared with docker compose). Copying them
+# here would recreate the drift this layout removes. `kubectl apply -k` cannot pass the
+# flag, so always go through `make up` / `make apply`.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: market
+
 resources:
-  - namespace.yaml
-  - kafka.yaml
-  - minio.yaml
-  - cassandra.yaml
-  - spark.yaml
-  - airflow.yaml
-  - market-api.yaml
-  - monitoring.yaml
+  - namespaces.yaml
+  - kafka/kafka.yaml
+  - kafka/topics.yaml                 # generated: python -m infra.scripts.gen_kafka_topics
+  - minio/minio.yaml
+  - cassandra/k8ssandra-cluster.yaml
+  - cassandra/schema-job.yaml
+  - airflow/postgres.yaml
+  - airflow/spark-rbac.yaml
+  - market/market-api.yaml
+  - monitoring/monitors.yaml
 
 configMapGenerator:
-  - name: grafana-datasources
-    namespace: market
+  - name: cassandra-schema
+    namespace: cassandra
     files:
-      - datasources.yml=../monitoring/grafana/provisioning/datasources/datasources.yml
-  - name: grafana-dashboard-provider
-    namespace: market
-    files:
-      - dashboards.yml=../monitoring/grafana/provisioning/dashboards/dashboards.yml
-  - name: grafana-dashboards
-    namespace: market
+      - cassandra.cql=../../contracts/cassandra.cql
+  - name: grafana-dashboards-market
+    namespace: monitoring
     files:
       - market-overview.json=../monitoring/grafana/dashboards/market-overview.json
       - infra-health.json=../monitoring/grafana/dashboards/infra-health.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: Market Lakehouse
 
 generatorOptions:
+  # Stable names: the Job and the Grafana sidecar reference these ConfigMaps by name.
   disableNameSuffixHash: true

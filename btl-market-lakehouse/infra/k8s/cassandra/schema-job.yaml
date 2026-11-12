@@ -1,0 +1,49 @@
+# Applies contracts/cassandra.cql (mounted from the generated ConfigMap cassandra-schema;
+# see kustomization.yaml) and then sets the keyspace replication for the K8ssandra DC.
+#
+# The contract file uses SimpleStrategy RF 1 so it also works on the docker compose
+# Cassandra; on K8ssandra we switch to NetworkTopologyStrategy {dc1: REPLICATION}
+# (1 in dev, 3 for a 3-node demo). Every statement is IF NOT EXISTS / ALTER, so the Job
+# can run again after the contract changes (kubectl delete job + make up).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cassandra-schema
+  namespace: cassandra
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: cqlsh
+          image: cassandra:4.1
+          env:
+            - name: CQL_HOST
+              value: market-dc1-service.cassandra.svc
+            - name: REPLICATION
+              value: "1"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              until cqlsh "$CQL_HOST" -e "describe keyspaces" >/dev/null 2>&1; do
+                echo "waiting for $CQL_HOST"; sleep 10;
+              done
+              cqlsh "$CQL_HOST" -f /schema/cassandra.cql
+              cqlsh "$CQL_HOST" -e "ALTER KEYSPACE market WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': $REPLICATION};"
+              cqlsh "$CQL_HOST" -e "DESCRIBE TABLES;"
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: schema
+          configMap:
+            name: cassandra-schema
