@@ -1,0 +1,52 @@
+# Strimzi Kafka Connect cluster for the bronze S3 sinks (role A).
+# Requires (role D, `make up`): Strimzi operator + Kafka "market" in namespace kafka,
+# MinIO, and the secret minio-credentials copied into namespace kafka.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: market-connect
+  namespace: kafka
+  annotations:
+    # Connectors are declared as KafkaConnector resources (s3-sink-*.yaml), not via REST.
+    strimzi.io/use-connector-resources: "true"
+spec:
+  # Must match the Strimzi/Kafka versions baked into btl/kafka-connect-s3 (see
+  # ingest/kafka_connect/Dockerfile ARGs).
+  version: 3.9.0
+  replicas: 1
+  image: btl/kafka-connect-s3:dev
+  bootstrapServers: market-kafka-bootstrap:9092
+  config:
+    group.id: market-connect
+    offset.storage.topic: market-connect-offsets
+    config.storage.topic: market-connect-configs
+    status.storage.topic: market-connect-status
+    # -1 = broker default: 1 on the dev cluster, 3 on the 3-broker demo cluster.
+    config.storage.replication.factor: -1
+    offset.storage.replication.factor: -1
+    status.storage.replication.factor: -1
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+  template:
+    connectContainer:
+      env:
+        # The S3 sink uses the AWS default credential chain; MinIO keys are passed as
+        # AWS_* variables.
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: MINIO_ACCESS_KEY
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: MINIO_SECRET_KEY
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
